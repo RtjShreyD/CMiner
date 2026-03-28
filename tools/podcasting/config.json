@@ -1,0 +1,7 @@
+{
+  "models": {
+    "planner_model": "models/gemini-flash-latest",
+    "character_image_model": "models/gemini-2.5-flash-image",
+    "character_text_model": "models/gemini-flash-latest"
+  }
+}
