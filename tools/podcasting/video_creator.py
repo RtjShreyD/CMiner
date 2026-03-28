@@ -40,10 +40,23 @@ class VideoCreator:
             
             # Segment video for this scene
             seg_path = session_dir / f"seg_{i}.mp4"
-            subprocess.run([
-                "ffmpeg", "-y", "-loop", "1", "-i", str(frame_path), "-i", audio_path,
-                "-c:v", "libx264", "-t", str(duration), "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(seg_path)
-            ], check=True, capture_output=True)
+            overlay_dir = session_dir / "overlays" / f"scene_{i}"
+            
+            if overlay_dir.exists() and any(overlay_dir.iterdir()):
+                # We have a sequence of text cloud frames
+                subprocess.run([
+                    "ffmpeg", "-y", 
+                    "-loop", "1", "-i", str(frame_path), 
+                    "-framerate", "24", "-i", f"{overlay_dir}/frame_%04d.png",
+                    "-i", audio_path,
+                    "-filter_complex", "[0:v][1:v]overlay=shortest=1,format=yuv420p",
+                    "-c:v", "libx264", "-c:a", "aac", "-shortest", str(seg_path)
+                ], check=True, capture_output=True)
+            else:
+                subprocess.run([
+                    "ffmpeg", "-y", "-loop", "1", "-i", str(frame_path), "-i", audio_path,
+                    "-c:v", "libx264", "-t", str(duration), "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(seg_path)
+                ], check=True, capture_output=True)
 
         # Concatenate segments
         concat_file = session_dir / "concat.txt"

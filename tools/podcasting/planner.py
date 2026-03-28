@@ -22,13 +22,15 @@ class Planner:
             "   - name: Character name.\n"
             "   - prompt: A highly detailed physical description prompt for anime-style image generation.\n"
             "   - voice_profile: Description of their voice.\n"
+            "   - screen_position: MUST be exactly 'left' or 'right' depending on where they sit at the table. This dictates where their speech bubble will appear.\n"
             f"   - assigned_voice: Analyze the character's demographic and tone, and MUST assign an EXACT string key from this available voice pool: {json.dumps(self.tts_voices_pool)}. ONLY output the exact key string (e.g. 'en-US-AriaNeural').\n"
             "4. scenes: A sequence of scenes representing the podcast dialogue. For each scene, include:\n"
             "   - character: The character currently speaking.\n"
             "   - dialogue: The text for text-to-speech.\n"
             "   - alteration_prompt: A description of how the base `podcast_setup_prompt` changes for this specific scene, focusing primarily on the speaking character's expressions and gestures while keeping the core layout identical. (e.g., 'Same scene holding the same layout but <Character A> is now leaning forward with a concerned expression, hands clasped, while <Character B> is listening attentively').\n"
             "   - duration: Approximate duration in seconds (based on dialogue length, ~150 words per minute).\n"
-            "5. frame_stitching_strategy: Instructions for transitions and overlays.\n\n"
+            "5. text_cloud_strategy: Instructions on styling the text cloud (e.g., comic book style, neon, sci-fi HUD) to match the scene.\n"
+            "6. frame_stitching_strategy: Instructions for transitions and overlays.\n\n"
             "Return ONLY strict JSON."
         )
         

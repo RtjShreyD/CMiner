@@ -1,5 +1,7 @@
 import os
 import subprocess
+import asyncio
+import json
 from pathlib import Path
 from typing import Dict, Any, List
 from tools.podcasting.utils import get_model
@@ -79,8 +81,9 @@ class TTSGen:
                     with open(audio_path, "wb") as out:
                         out.write(response.audio_content)
                 else:
-                    # Fallback to edge-tts (High quality Microsoft Neural voices via LLM assignment)
-                    subprocess.run(["edge-tts", "--voice", edge_voice_name, "--text", dialogue, "--write-media", str(audio_path)], check=True)
+                    # Fallback to edge-tts native API to collect WordBoundaries
+                    timing_path = audio_dir / f"scene_{i}_timing.json"
+                    asyncio.run(self._generate_edge_audio_and_timing(dialogue, edge_voice_name, audio_path, timing_path))
                     
                 audio_files.append(str(audio_path))
                 
@@ -89,4 +92,38 @@ class TTSGen:
 
                 
         return audio_files
+
+    async def _generate_edge_audio_and_timing(self, text: str, voice: str, audio_path: Path, timing_path: Path):
+        import edge_tts
+        communicate = edge_tts.Communicate(text, voice)
+        with open(audio_path, "wb") as audio_file:
+            timing_data = []
+            sentences = []
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_file.write(chunk["data"])
+                elif chunk["type"] == "WordBoundary":
+                    timing_data.append({
+                        "text": chunk["text"],
+                        "offset": chunk["offset"],
+                        "duration": chunk["duration"]
+                    })
+                elif chunk["type"] == "SentenceBoundary":
+                    sentences.append(chunk)
+                    
+            if not timing_data and sentences:
+                for s in sentences:
+                    text = s["text"]
+                    words = text.split()
+                    if not words: continue
+                    dur_per_word = s["duration"] // len(words)
+                    for i, w in enumerate(words):
+                        timing_data.append({
+                            "text": w,
+                            "offset": s["offset"] + (i * dur_per_word),
+                            "duration": dur_per_word
+                        })
+        
+        with open(timing_path, "w") as f:
+            json.dump(timing_data, f, indent=2)
 

@@ -12,6 +12,7 @@ from tools.podcasting.utils import ensure_session_outputs
 from tools.podcasting.planner import Planner
 from tools.podcasting.character_gen import CharacterGen
 from tools.podcasting.tts_gen import TTSGen
+from tools.podcasting.text_cloud_gen import TextCloudGen
 from tools.podcasting.video_creator import VideoCreator
 
 
@@ -56,11 +57,15 @@ def main():
     char_gen = CharacterGen(image_model_name=char_image_model, text_model_name=char_text_model, max_generations=max_image_gens)
     char_map = char_gen.run(storyboard, session_dir)
     
-    # 3. TTS Generation
+    # 3. TTS Generation (Audio + WordBoundary Timing metadata)
     tts_gen = TTSGen(model_name=tts_model_name)
     audio_files = tts_gen.run(storyboard, session_dir)
     
-    # 4. Video Creation
+    # 4. Text Cloud / Speech Bubble Generation (Requires Timing Metadata)
+    cloud_gen = TextCloudGen(fps=24)
+    cloud_gen.run(storyboard, session_dir)
+    
+    # 5. Video Creation (Compositing Scenes + Audio + Bubbles)
     video_creator = VideoCreator()
     final_video = video_creator.run(storyboard, char_map, audio_files, session_dir)
     
