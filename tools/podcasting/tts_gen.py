@@ -23,7 +23,7 @@ class TTSGen:
                 
     def run(self, storyboard: Dict[str, Any], session_dir: Path) -> List[str]:
         use_gcp = self.client is not None
-        provider = "Google Cloud" if use_gcp else "Fallback (espeak)"
+        provider = "Google Cloud" if use_gcp else "Fallback (Edge-TTS)"
         print(f"--- Pipeline: TTS Gen ({provider}) ---")
         audio_dir = session_dir / "audio"
 
@@ -54,7 +54,11 @@ class TTSGen:
             
             print(f"Generating audio for {char_name} using {voice_name}: {dialogue[:30]}...")
             
-            audio_path = audio_dir / f"scene_{i}.wav"
+            if use_gcp:
+                audio_path = audio_dir / f"scene_{i}.wav"
+            else:
+                audio_path = audio_dir / f"scene_{i}.mp3"
+
             try:
                 if use_gcp:
                     synthesis_input = texttospeech.SynthesisInput(text=dialogue)
@@ -75,10 +79,16 @@ class TTSGen:
                     with open(audio_path, "wb") as out:
                         out.write(response.audio_content)
                 else:
-                    # Fallback to espeak
-                    voice_variant = f"f{(i % 4)+1}" if "female" in voice_name else f"m{(i % 4)+1}"
-                    voice_cmd = f"en-us+{voice_variant}"
-                    subprocess.run(["espeak", "-v", voice_cmd, "-w", str(audio_path), dialogue], check=False)
+                    # Fallback to edge-tts (High quality Microsoft Neural voices)
+                    edge_males = ["en-US-ChristopherNeural", "en-US-GuyNeural", "en-US-EricNeural", "en-US-RogerNeural"]
+                    edge_females = ["en-US-AriaNeural", "en-US-JennyNeural", "en-US-AnaNeural", "en-US-MichelleNeural"]
+                    
+                    if "female" in voice_name.lower():
+                        voice_variant = edge_females[i % len(edge_females)]
+                    else:
+                        voice_variant = edge_males[i % len(edge_males)]
+                        
+                    subprocess.run(["edge-tts", "--voice", voice_variant, "--text", dialogue, "--write-media", str(audio_path)], check=True)
                     
                 audio_files.append(str(audio_path))
                 
