@@ -1,0 +1,17 @@
+{
+  "default_model": "gemini-1.5-flash",
+  "openclaw": {
+    "models": {
+      "default": "github-copilot/gpt-4.1",
+      "tasks": {
+        "news_primary": "github-copilot/gpt-4.1",
+        "news_fallback": "github-copilot/gpt-4.1",
+        "news_seeded": "github-copilot/gpt-4.1"
+      }
+    }
+  },
+  "root_agent": {
+    "max_attempts": 2
+  },
+  "agents": {}
+}
