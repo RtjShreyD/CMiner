@@ -63,8 +63,25 @@ def _build_parser() -> argparse.ArgumentParser:
         default=5,
         help="Number of Instagram slides (clamped to 4-5 by pipeline)",
     )
+    
+    podcasting_parser = subparsers.add_parser(
+        "podcasting",
+        help="Run OpenClaw podcasting report pipeline",
+        description="Run OpenClaw podcasting report pipeline",
+    )
+    podcasting_parser.add_argument("--workspace", default=".", help="Workspace root")
+    podcasting_parser.add_argument("--agent", default="podcaster", help="OpenClaw agent id")
+    podcasting_parser.add_argument("--openclaw-bin", default="openclaw", help="OpenClaw binary path")
+    podcasting_parser.add_argument("--prompt", required=True, help="User prompt for the podcast")
+    podcasting_parser.add_argument(
+        "--thinking",
+        choices=["off", "minimal", "low", "medium", "high", "xhigh"],
+        default="high",
+        help="OpenClaw thinking level",
+    )
 
     return parser
+
 
 
 def _run_openclaw_passthrough(openclaw_args: list[str]) -> int:
@@ -105,6 +122,34 @@ def _run_newsdesk(
     return proc.returncode
 
 
+def _run_podcasting(
+    workspace: str,
+    agent: str,
+    openclaw_bin: str,
+    prompt: str,
+    thinking: str,
+) -> int:
+    script = ROOT / "tools" / "podcasting" / "run.py"
+    venv_python = ROOT / ".venv" / "bin" / "python3"
+    
+    cmd = [
+        str(venv_python) if venv_python.exists() else sys.executable,
+        str(script),
+        "--workspace",
+        workspace,
+        "--agent",
+        agent,
+        "--openclaw-bin",
+        openclaw_bin,
+        "--prompt",
+        prompt,
+        "--thinking",
+        thinking,
+    ]
+    proc = subprocess.run(cmd, check=False)
+    return proc.returncode
+
+
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args(sys.argv[1:])
@@ -124,6 +169,18 @@ def main() -> None:
                 insta_count=args.insta_count,
             )
         )
+
+    if args.command == "podcasting":
+        raise SystemExit(
+            _run_podcasting(
+                workspace=args.workspace,
+                agent=args.agent,
+                openclaw_bin=args.openclaw_bin,
+                prompt=args.prompt,
+                thinking=args.thinking,
+            )
+        )
+
 
     parser.print_help()
     raise SystemExit(2)
