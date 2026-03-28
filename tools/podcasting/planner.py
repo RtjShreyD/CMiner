@@ -5,8 +5,9 @@ from tools.podcasting.utils import get_model
 
 
 class Planner:
-    def __init__(self, model_name: str = "models/gemini-flash-latest"):
+    def __init__(self, model_name: str = "models/gemini-flash-latest", tts_voices_pool: Dict[str, str] = None):
         self.model_name = model_name
+        self.tts_voices_pool = tts_voices_pool or {}
 
     def run(self, user_prompt: str, session_dir: Path) -> Dict[str, Any]:
         print(f"--- Pipeline: Planner ---")
@@ -21,6 +22,7 @@ class Planner:
             "   - name: Character name.\n"
             "   - prompt: A highly detailed physical description prompt for anime-style image generation.\n"
             "   - voice_profile: Description of their voice.\n"
+            f"   - assigned_voice: Analyze the character's demographic and tone, and MUST assign an EXACT string key from this available voice pool: {json.dumps(self.tts_voices_pool)}. ONLY output the exact key string (e.g. 'en-US-AriaNeural').\n"
             "4. scenes: A sequence of scenes representing the podcast dialogue. For each scene, include:\n"
             "   - character: The character currently speaking.\n"
             "   - dialogue: The text for text-to-speech.\n"

@@ -4,8 +4,14 @@
     "character_image_model": "models/gemini-2.5-flash-image",
     "character_text_model": "models/gemini-flash-latest"
   },
-  "tts_voices": {
-    "edge_males": ["en-US-ChristopherNeural", "en-US-GuyNeural", "en-US-EricNeural", "en-US-RogerNeural"],
-    "edge_females": ["en-US-AriaNeural", "en-US-JennyNeural", "en-US-AnaNeural", "en-US-MichelleNeural"]
+  "tts_voices_pool": {
+    "en-US-AriaNeural": "English (US), Female, Professional/Engaging",
+    "en-US-ChristopherNeural": "English (US), Male, Reliable/Authoritative",
+    "en-GB-SoniaNeural": "English (UK), Female, Cheerful",
+    "en-GB-RyanNeural": "English (UK), Male, Professional",
+    "en-IN-NeerjaNeural": "English (India), Female, Clear",
+    "en-IN-PrabhatNeural": "English (India), Male, Clear",
+    "hi-IN-SwaraNeural": "Hindi (India), Female, Friendly",
+    "hi-IN-MadhurNeural": "Hindi (India), Male, Friendly"
   }
 }
