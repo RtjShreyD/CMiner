@@ -36,9 +36,12 @@ class TTSGen:
         available_female_voices = ["en-US-Journey-F", "en-US-Journey-O"]
         
         char_voices = {}
+        char_is_female = {}
         for i, char_info in enumerate(char_descriptions):
             name = char_info.get("name")
-            if "female" in char_info.get("voice_profile", "").lower():
+            is_female = "female" in char_info.get("voice_profile", "").lower()
+            char_is_female[name] = is_female
+            if is_female:
                 char_voices[name] = available_female_voices[i % len(available_female_voices)]
             else:
                 char_voices[name] = available_male_voices[i % len(available_male_voices)]
@@ -48,6 +51,7 @@ class TTSGen:
             dialogue = scene.get("dialogue", "")
             char_name = scene.get("character")
             voice_name = char_voices.get(char_name, "en-US-Journey-D")
+            is_female = char_is_female.get(char_name, False)
             
             if not dialogue:
                 continue
@@ -83,7 +87,7 @@ class TTSGen:
                     edge_males = ["en-US-ChristopherNeural", "en-US-GuyNeural", "en-US-EricNeural", "en-US-RogerNeural"]
                     edge_females = ["en-US-AriaNeural", "en-US-JennyNeural", "en-US-AnaNeural", "en-US-MichelleNeural"]
                     
-                    if "female" in voice_name.lower():
+                    if is_female:
                         voice_variant = edge_females[i % len(edge_females)]
                     else:
                         voice_variant = edge_males[i % len(edge_males)]
