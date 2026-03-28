@@ -12,8 +12,10 @@ except ImportError:
 
 
 class TTSGen:
-    def __init__(self, model_name: str = "models/gemini-flash-latest"):
+    def __init__(self, model_name: str = "models/gemini-flash-latest", edge_males: List[str] = None, edge_females: List[str] = None):
         self.model_name = model_name
+        self.edge_males = edge_males or ["en-US-ChristopherNeural", "en-US-GuyNeural", "en-US-EricNeural", "en-US-RogerNeural"]
+        self.edge_females = edge_females or ["en-US-AriaNeural", "en-US-JennyNeural", "en-US-AnaNeural", "en-US-MichelleNeural"]
         self.client = None
         if GCP_TTS_AVAILABLE:
             try:
@@ -84,13 +86,10 @@ class TTSGen:
                         out.write(response.audio_content)
                 else:
                     # Fallback to edge-tts (High quality Microsoft Neural voices)
-                    edge_males = ["en-US-ChristopherNeural", "en-US-GuyNeural", "en-US-EricNeural", "en-US-RogerNeural"]
-                    edge_females = ["en-US-AriaNeural", "en-US-JennyNeural", "en-US-AnaNeural", "en-US-MichelleNeural"]
-                    
                     if is_female:
-                        voice_variant = edge_females[i % len(edge_females)]
+                        voice_variant = self.edge_females[i % len(self.edge_females)]
                     else:
-                        voice_variant = edge_males[i % len(edge_males)]
+                        voice_variant = self.edge_males[i % len(self.edge_males)]
                         
                     subprocess.run(["edge-tts", "--voice", voice_variant, "--text", dialogue, "--write-media", str(audio_path)], check=True)
                     

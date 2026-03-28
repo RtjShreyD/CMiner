@@ -43,6 +43,10 @@ def main():
     char_text_model = models_config.get("character_text_model", "models/gemini-flash-latest")
     tts_model_name = models_config.get("tts_gen_model", "models/gemini-flash-latest")
     
+    tts_voices = config.get("tts_voices", {})
+    edge_males = tts_voices.get("edge_males", ["en-US-ChristopherNeural", "en-US-GuyNeural", "en-US-EricNeural", "en-US-RogerNeural"])
+    edge_females = tts_voices.get("edge_females", ["en-US-AriaNeural", "en-US-JennyNeural", "en-US-AnaNeural", "en-US-MichelleNeural"])
+    
     print(f"Session directory: {session_dir}")
 
     # 1. Planner
@@ -54,7 +58,7 @@ def main():
     char_map = char_gen.run(storyboard, session_dir)
     
     # 3. TTS Generation
-    tts_gen = TTSGen(model_name=tts_model_name)
+    tts_gen = TTSGen(model_name=tts_model_name, edge_males=edge_males, edge_females=edge_females)
     audio_files = tts_gen.run(storyboard, session_dir)
     
     # 4. Video Creation
