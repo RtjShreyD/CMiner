@@ -7,9 +7,10 @@ from PIL import Image
 from tools.podcasting.utils import get_model
 
 class CharacterGen:
-    def __init__(self, image_model_name: str = "models/gemini-2.5-flash-image", text_model_name: str = "models/gemini-flash-latest"):
+    def __init__(self, image_model_name: str = "models/gemini-2.5-flash-image", text_model_name: str = "models/gemini-flash-latest", max_generations: int = 15):
         self.image_model_name = image_model_name
         self.text_model_name = text_model_name
+        self.max_generations = max_generations
 
     def run(self, storyboard: Dict[str, Any], session_dir: Path) -> Dict[str, Any]:
         print(f"--- Pipeline: Scene & Character Generation ---")
@@ -39,8 +40,8 @@ class CharacterGen:
             if alt not in unique_alterations:
                 unique_alterations.append(alt)
                 
-        # Limit to 5 alterations max to avoid excessive API calls
-        unique_alterations = unique_alterations[:5]
+        # Limit to configured maximum alterations max to avoid excessive API calls
+        unique_alterations = unique_alterations[:self.max_generations]
         
         alterations_map = {"base_scene": str(base_scene_path)}
         

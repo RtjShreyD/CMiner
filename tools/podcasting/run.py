@@ -42,6 +42,7 @@ def main():
     char_image_model = models_config.get("character_image_model", "models/gemini-2.5-flash-image")
     char_text_model = models_config.get("character_text_model", "models/gemini-flash-latest")
     tts_model_name = models_config.get("tts_gen_model", "models/gemini-flash-latest")
+    max_image_gens = models_config.get("max_image_generations", 15)
     
     tts_voices_pool = config.get("tts_voices_pool", {})
     
@@ -52,7 +53,7 @@ def main():
     storyboard = planner.run(args.prompt, session_dir)
     
     # 2. Character Generation
-    char_gen = CharacterGen(image_model_name=char_image_model, text_model_name=char_text_model)
+    char_gen = CharacterGen(image_model_name=char_image_model, text_model_name=char_text_model, max_generations=max_image_gens)
     char_map = char_gen.run(storyboard, session_dir)
     
     # 3. TTS Generation
