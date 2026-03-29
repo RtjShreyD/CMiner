@@ -77,6 +77,33 @@ def _build_parser() -> argparse.ArgumentParser:
         help="OpenClaw thinking level",
     )
 
+    manga_parser = subparsers.add_parser(
+        "narrativeManga",
+        help="Run NarrativeManga episodic video pipeline",
+        description="Generate episodic manga-style videos with multi-character support",
+    )
+    manga_parser.add_argument("--workspace", default=".", help="Workspace root")
+    manga_parser.add_argument("--prompt", help="Override base prompt (otherwise reads prompt.txt)")
+    manga_parser.add_argument(
+        "--step",
+        choices=["all", "planner", "chars", "scenes", "audio", "clouds", "video"],
+        default="all",
+        help="Execute specific pipeline step",
+    )
+    manga_parser.add_argument("--session", help="Continue work in an existing session directory")
+    manga_parser.add_argument("--episode", type=int, help="Target a specific episode number")
+    manga_parser.add_argument(
+        "--episodes",
+        choices=["new", "continue"],
+        default="new",
+        help="'new' starts a fresh series. 'continue' plans the next episode from prior context.",
+    )
+    manga_parser.add_argument(
+        "--develop",
+        action="store_true",
+        help="When used with --episodes continue, also runs generation chains.",
+    )
+
     return parser
 
 
@@ -163,6 +190,41 @@ def _run_podcasting(
     return proc.returncode
 
 
+def _run_narrative_manga(
+    workspace: str,
+    prompt: str | None,
+    step: str = "all",
+    session: str | None = None,
+    episode: int | None = None,
+    episodes: str = "new",
+    develop: bool = False,
+) -> int:
+    runner_script = ROOT / "agents" / "narrativeManga" / "run.py"
+    venv_python = ROOT / ".venv" / "bin" / "python3"
+
+    cmd = [
+        str(venv_python) if venv_python.exists() else sys.executable,
+        str(runner_script),
+        "--workspace",
+        workspace,
+        "--step",
+        step,
+    ]
+    if prompt:
+        cmd.extend(["--prompt", prompt])
+    if session:
+        cmd.extend(["--session", session])
+    if episode is not None:
+        cmd.extend(["--episode", str(episode)])
+    if episodes == "continue":
+        cmd.append("--episodes")
+        cmd.append("continue")
+    if develop:
+        cmd.append("--develop")
+    proc = subprocess.run(cmd, check=False)
+    return proc.returncode
+
+
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args(sys.argv[1:])
@@ -199,6 +261,18 @@ def main() -> None:
             )
         )
 
+    if args.command == "narrativeManga":
+        raise SystemExit(
+            _run_narrative_manga(
+                workspace=args.workspace,
+                prompt=args.prompt,
+                step=args.step,
+                session=args.session,
+                episode=args.episode,
+                episodes=args.episodes,
+                develop=args.develop,
+            )
+        )
 
     parser.print_help()
     raise SystemExit(2)

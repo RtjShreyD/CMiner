@@ -1,0 +1,26 @@
+{
+  "models": {
+    "planner_model": "models/gemini-flash-latest",
+    "character_image_model": "models/gemini-2.5-flash-image",
+    "scene_image_model": "models/gemini-2.5-flash-image",
+    "max_image_requests": 50,
+    "max_chars_per_episode": 5,
+    "max_episode_duration_mins": 5
+  },
+  "tts_voices_pool": {
+    "en-US-AriaNeural": "English (US), Female, Professional/Engaging",
+    "en-US-ChristopherNeural": "English (US), Male, Reliable/Authoritative",
+    "en-GB-SoniaNeural": "English (UK), Female, Cheerful",
+    "en-GB-RyanNeural": "English (UK), Male, Professional",
+    "en-IN-NeerjaNeural": "English (India), Female, Clear",
+    "en-IN-PrabhatNeural": "English (India), Male, Clear",
+    "hi-IN-SwaraNeural": "Hindi (India), Female, Friendly",
+    "hi-IN-MadhurNeural": "Hindi (India), Male, Friendly"
+  },
+  "video": {
+    "resolution": [1280, 720],
+    "fps": 8,
+    "target_duration_mins": 5
+  },
+  "art_style": "cinematic anime, atmospheric lighting, detailed linework, consistent character design, seinen manga aesthetic with dramatic color palette"
+}
