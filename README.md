@@ -66,6 +66,37 @@ Automates news gathering and analysis reports.
 python3 main.py newsdesk --agent newsaligator --hours 24
 ```
 
+### NarrativeManga Agent
+Generates episodic, cinematic manga-style videos with high character consistency and plot continuity.
+
+#### 🎬 Episodic Workflow
+The agent manages series state and allows for sequential episode generation.
+
+*   **Start a New Series**:
+    ```bash
+    python3 main.py narrativeManga --prompt "A sci-fi detective noir"
+    ```
+*   **Plan the Next Episode**:
+    ```bash
+    python3 main.py narrativeManga --session outputs/XXXXXXX/narrativeManga --episodes continue
+    ```
+*   **Develop the Next Episode**:
+    ```bash
+    python3 main.py narrativeManga --session outputs/XXXXXXX/narrativeManga --episodes continue --develop
+    ```
+
+#### 🛠️ Modular Pipeline
+Similar to the Podcasting agent, NarrativeManga can be run step-by-step:
+- `planner`: Storyboard and character design.
+- `chars`: Reference portraits for consistency.
+- `scenes`: Multi-modal panel generation using portraits.
+- `audio`: TTS with synchronized word timing.
+- `clouds`: Dynamic speech bubble placement (OpenCV).
+- `video`: Final FFmpeg assembly.
+
+> [!IMPORTANT]
+> **Character Consistency**: This agent uses multimodal anchoring. Portraits generated in the `chars` step are used as references for all subsequent `scenes`, ensuring characters look the same across the entire series.
+
 ## 📂 Project Structure
 
 - `agents/`: Contains specialized autonomous agents.
