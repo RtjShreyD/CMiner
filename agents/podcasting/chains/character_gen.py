@@ -32,7 +32,7 @@ class CharacterGen:
             "CRITICAL: Generate in 16:9 aspect ratio, 1280x720 resolution standard."
         )
         
-        # 1. Generate Base Scene (or use attached)
+        # 1. Generate Base Scene (or use attached/existing)
         base_scene_path = out_dir / "base_scene.png"
         if self.attached_scene:
             try:
@@ -40,8 +40,9 @@ class CharacterGen:
                 shutil.copy(self.attached_scene, base_scene_path)
                 print(f"Using attached scene image: {self.attached_scene}")
             except Exception as e:
-                print(f"Error copying attached scene: {e}, falling back to generation.")
-                self._generate_image(base_scene_prompt, base_scene_path)
+                print(f"Error copying attached scene: {e}")
+        elif base_scene_path.exists():
+            print(f"Base scene exists at {base_scene_path}, skipping generation.")
         else:
             print("Generating base scene...")
             self._generate_image(base_scene_prompt, base_scene_path)
@@ -58,25 +59,36 @@ class CharacterGen:
         
         alterations_map = {"base_scene": str(base_scene_path)}
         
-        # 3. Generate Alterations
-        # Since I cannot reliably pass image as context for image generation editing with gemini-2.5-flash-image
-        # I will generate variations using highly detailed prompts referencing the base setup.
+        # 3. Handle Alterations (Resume & Attached logic)
         for i, alt_prompt in enumerate(unique_alterations):
             alt_name = f"alteration_{i:02d}"
-            print(f"Generating alteration: {alt_name}")
-            
             alt_path = out_dir / f"{alt_name}.png"
-            # PRO-TIP: We provide the base scene as the first part of the message to ensure subject consistency
-            # Gemini 1.5/2.5 Flash Image models can anchor to this reference.
+            
+            # Case 1: Use Attached Character Image if available for this slot
+            if i < len(self.attached_chars):
+                try:
+                    import shutil
+                    shutil.copy(self.attached_chars[i], alt_path)
+                    print(f"Using attached character image for {alt_path.name}")
+                    alterations_map[alt_prompt] = str(alt_path)
+                    continue
+                except Exception as e:
+                    print(f"Error copying attached char {i}: {e}")
+
+            # Case 2: Use existing file (Resume)
+            if alt_path.exists():
+                print(f"Found existing asset {alt_path.name}, skipping generation.")
+                alterations_map[alt_prompt] = str(alt_path)
+                continue
+
+            # Case 3: Generate New
+            print(f"Generating alteration: {alt_name}")
             model = get_model(self.image_model_name)
             
             try:
-                # Load base image as bytes
                 with open(base_scene_path, 'rb') as f:
                     image_bytes = f.read()
                 
-                # Construct multimodal request: [Image, Prompt]
-                # This ensures the model 'sees' the base characters/layout before generating the variation.
                 response = model.generate_content([
                     {
                         "mime_type": "image/png",
@@ -95,7 +107,6 @@ class CharacterGen:
                 
                 if image_data:
                     alt_path.write_bytes(image_data)
-                    # Force resize to 1280x720 to avoid text cloud clipping
                     with Image.open(alt_path) as img:
                         if img.size != (1280, 720):
                             print(f"Resizing alteration from {img.size} to (1280, 720)")
@@ -103,11 +114,11 @@ class CharacterGen:
                         img.save(alt_path)
                     print(f"Successfully generated alteration: {alt_path.name}")
                 else:
-                    raise ValueError("No image returned from multimodal prompt.")
+                    raise ValueError("No image returned.")
                 
             except Exception as e:
                 print(f"Consistency generation failed for alteration {i}, falling back to text-only: {e}")
-                self._generate_image(full_alt_prompt, alt_path)
+                self._generate_image(alt_prompt, alt_path)
 
             alterations_map[alt_prompt] = str(alt_path)
         

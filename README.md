@@ -45,17 +45,17 @@ Generates cinematic text-to-video podcasts with character consistency and real-t
 python3 main.py podcasting --prompt "A debate about AI ethics"
 ```
 
-#### 🏗️ Step-by-Step
+#### 🏗️ Modular & Resume Workflow
 Execute individual phases to review or refine intermediate outputs. State is persisted in your session directory (found in `outputs/`).
 
 1. **Plan:** `python3 main.py podcasting --prompt "Your topic" --step planner`
-2. **Images:** `python3 main.py podcasting --step images --session outputs/XXXXXXX/podCasting`
-3. **Audio:** `python3 main.py podcasting --step audio --session outputs/XXXXXXX/podCasting`
-4. **Overlays:** `python3 main.py podcasting --step clouds --session outputs/XXXXXXX/podCasting`
-5. **Render:** `python3 main.py podcasting --step video --session outputs/XXXXXXX/podCasting`
+2. **Images:** `python3 main.py podcasting --session outputs/XXXXXXX/podCasting --step images`
+3. **Audio:** `python3 main.py podcasting --session outputs/XXXXXXX/podCasting --step audio`
+4. **Overlays:** `python3 main.py podcasting --session outputs/XXXXXXX/podCasting --step clouds`
+5. **Render:** `python3 main.py podcasting --session outputs/XXXXXXX/podCasting --step video`
 
 > [!TIP]
-> Use the **`--session`** flag (e.g., `--session outputs/1234567/podCasting`) to continue or re-run specific steps on an existing generation without starting over.
+> **Resume Logic**: The agent now supports incremental generation. If you use the `--session` flag and an asset (e.g., `base_scene.png`) already exists, the generator will **skip** the API call and use the local file. This is perfect for resuming failed runs or tweaking individual steps without regenerating everything.
 
 *See [agents/podcasting/README.md](agents/podcasting/README.md) for advanced modular usage and asset injection.*
 

@@ -15,8 +15,11 @@ To run the entire pipeline automatically from the project root:
 python3 main.py podcasting --prompt "A debate between a surfer and a physicist about the perfect wave."
 ```
 
-### Modular Step-by-Step Run
-For more control, you can execute individual phases of the pipeline. State is persisted in the session directory.
+### Modular & Resume Workflow
+For more control or to resume a previous run, you can execute individual phases. 
+
+> [!IMPORTANT]
+> **Resume Logic**: The agent now performs **incremental generation**. If an image or scene already exists in the session directory, it will **skip the API call** and reuse the local file. This allows you to resume failed runs or tweak steps without regenerating everything.
 
 #### 1. Planning Phase
 Generates the `storyboard.json`.
@@ -25,27 +28,27 @@ python3 main.py podcasting --prompt "Your prompt" --step planner
 ```
 
 #### 2. Visual Generation
-Generates the base scene and all character alterations based on the storyboard.
+Generates the base scene and all character alterations. Existing images are skipped.
 ```bash
-python3 main.py podcasting --step images --session outputs/XXXXXXX/podCasting
+python3 main.py podcasting --session outputs/XXXXXXX/podCasting --step images
 ```
 
 #### 3. Audio & Timing
 Generates TTS audio and precise word-boundary timing metadata.
 ```bash
-python3 main.py podcasting --step audio --session outputs/XXXXXXX/podCasting
+python3 main.py podcasting --session outputs/XXXXXXX/podCasting --step audio
 ```
 
 #### 4. Text Overlays
 Generates the transparent PNG frames for the speech bubbles and real-time text.
 ```bash
-python3 main.py podcasting --step clouds --session outputs/XXXXXXX/podCasting
+python3 main.py podcasting --session outputs/XXXXXXX/podCasting --step clouds
 ```
 
 #### 5. Final Video Render
 Composits all assets into the final `.mp4`.
 ```bash
-python3 main.py podcasting --step video --session outputs/XXXXXXX/podCasting
+python3 main.py podcasting --session outputs/XXXXXXX/podCasting --step video
 ```
 
 ## Advanced Features
