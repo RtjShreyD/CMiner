@@ -351,3 +351,28 @@ ContentSwitcher {
 TabPane {
     padding: 0;
 }
+
+/* ─── Image Preview (High Fidelity) ────────────────────────── */
+
+ImagePreview {
+    width: 100%;
+    height: auto;
+    padding: 1 2;
+    background: #1a1a2b;
+    border: tall #2d2d44;
+}
+
+#img-meta {
+    color: #fdcb6e;
+    margin-bottom: 1;
+    text-align: center;
+    width: 100%;
+    background: #2d2d44;
+    padding: 0 1;
+}
+
+#img-render {
+    width: 100%;
+    height: auto;
+    align-horizontal: center;
+}

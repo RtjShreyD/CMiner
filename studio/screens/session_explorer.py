@@ -38,6 +38,18 @@ def _file_category(path: Path) -> str:
     return "unknown"
 
 
+class FilteredDirectoryTree(DirectoryTree):
+    """Custom DirectoryTree that shows everything and handles expansion better."""
+
+    def filter_paths(self, paths: list[Path]) -> list[Path]:
+        # Include everything, including hidden files
+        return [p for p in paths if not p.name.startswith("__")]
+
+    def on_mount(self) -> None:
+        # Sort folders first (optional but nice)
+        pass
+
+
 class SessionExplorerPanel(Widget):
     """Dual-pane session explorer with directory tree and file preview."""
 
@@ -91,6 +103,12 @@ class SessionExplorerPanel(Widget):
     #open-external-btn {
         dock: right;
     }
+
+    #refresh-btn {
+        width: 100%;
+        background: #2d2d44;
+        margin-top: 1;
+    }
     """
 
     def __init__(self, outputs_dir: str | None = None, **kwargs) -> None:
@@ -104,9 +122,10 @@ class SessionExplorerPanel(Widget):
             with Vertical(id="tree-pane"):
                 yield Static("📂 Sessions", id="tree-title")
                 if self._outputs_dir.exists():
-                    yield DirectoryTree(str(self._outputs_dir), id="session-tree")
+                    yield FilteredDirectoryTree(str(self._outputs_dir), id="session-tree")
                 else:
                     yield Static("[dim]No outputs/ directory found. Run an agent first.[/dim]")
+                yield Button("↻ Refresh Tree", id="refresh-tree-btn", classes="btn-secondary")
 
             # Right pane: preview
             with Vertical(id="preview-pane"):
@@ -190,7 +209,13 @@ class SessionExplorerPanel(Widget):
             text_preview.write(f"[yellow]Unsupported file type: {path.suffix}[/yellow]")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "open-external-btn":
+        if event.button.id == "refresh-tree-btn":
+            tree = self.query_one("#session-tree", FilteredDirectoryTree)
+            tree.path = str(self._outputs_dir)
+            tree.reload()
+            self.app.notify("Tree refreshed", severity="information")
+
+        elif event.button.id == "open-external-btn":
             if self._selected_path and self._selected_path.exists():
                 try:
                     subprocess.Popen(

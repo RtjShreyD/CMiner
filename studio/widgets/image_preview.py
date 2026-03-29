@@ -5,16 +5,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+from textual.app import ComposeResult
 from textual.widget import Widget
 from textual.widgets import Static
 from textual.containers import VerticalScroll
 
 from PIL import Image
-from rich_pixels import Pixels
+
+
+from studio.widgets.graphics_engine import engine
 
 
 class ImagePreview(Static):
-    """Displays an image file rendered as terminal pixels.
+    """Displays an image file with high-fidelity terminal graphics.
 
     Usage:
         preview = ImagePreview()
@@ -24,53 +27,75 @@ class ImagePreview(Static):
     DEFAULT_CSS = """
     ImagePreview {
         width: 100%;
-        height: 1fr;
-        overflow-y: auto;
-        padding: 0;
+        height: auto;
+        padding: 1 2;
+        background: $surface;
+    }
+
+    #img-meta {
+        color: #fdcb6e;
+        margin-bottom: 1;
+        text-style: italic;
+    }
+
+    #img-render {
+        width: 100%;
+        height: auto;
     }
     """
 
     def __init__(
         self,
         file_path: Optional[str] = None,
-        max_width: int = 80,
+        max_width: int = 140,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self._file_path: Optional[Path] = Path(file_path) if file_path else None
         self._max_width = max_width
 
+    def compose(self) -> ComposeResult:
+        yield Static("", id="img-meta")
+        yield Static("", id="img-render")
+
     def on_mount(self) -> None:
         if self._file_path:
             self.load(str(self._file_path))
 
     def load(self, file_path: str) -> None:
-        """Load and render an image file."""
+        """Load and render an image file with best-available graphics protocol."""
         path = Path(file_path)
         if not path.exists():
-            self.update(f"[red]File not found: {path}[/red]")
+            self.query_one("#img-render", Static).update(f"[red]File Not Found: {path}[/red]")
             return
 
-        suffix = path.suffix.lower()
-        if suffix not in (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"):
-            self.update(f"[yellow]Unsupported image format: {suffix}[/yellow]")
-            return
+        # Show loading state
+        self.query_one("#img-meta", Static).update(f"[dim]⚡ Loading {path.name}...[/dim]")
+        self.query_one("#img-render", Static).update("")
 
         try:
-            with Image.open(path) as img:
-                # Resize to fit terminal width while preserving aspect ratio
-                # Terminal chars are ~2x taller than wide, so we halve height
-                w, h = img.size
-                scale = min(self._max_width / w, 1.0)
-                new_w = int(w * scale)
-                new_h = int(h * scale)
-                resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            # Use engine for high-res render and metadata
+            # We pass current widget width if it has one (minus padding)
+            w = self.size.width - 4 if self.size.width > 20 else self._max_width
+            result, metadata = engine.get_image_renderable(path, width=w)
 
-                pixels = Pixels.from_image(resized)
-                self.update(pixels)
+            if isinstance(result, str) and result.startswith("[red]"):
+                self.query_one("#img-render", Static).update(result)
+            else:
+                # Update metadata label
+                meta_text = (
+                    f"Dimensions: [bold]{metadata['resolution']}[/bold] | "
+                    f"Format: [bold]{metadata['format']}[/bold] | "
+                    f"Size: [bold]{metadata['filesize']}[/bold]"
+                )
+                self.query_one("#img-meta", Static).update(meta_text)
+
+                # Update render area
+                # For term-image, result is the image object. String conversion gives ANSI.
+                self.query_one("#img-render", Static).update(str(result))
 
         except Exception as e:
-            self.update(f"[red]Error loading image: {e}[/red]")
+            self.query_one("#img-render", Static).update(f"[red]Rendering Error: {e}[/red]")
 
     def clear_preview(self) -> None:
         """Clear the current preview."""
