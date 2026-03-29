@@ -35,7 +35,7 @@ class Planner:
             "   - name: Character name.\n"
             "   - prompt: A highly detailed physical description prompt for anime-style image generation.\n"
             "   - voice_profile: Description of their voice.\n"
-            "   - screen_position: MUST be exactly 'left' or 'right' depending on where they sit at the table. This dictates where their speech bubble will appear.\n"
+            "   - screen_position: MANDATORY. Must be exactly 'left' or 'right' (left=100, right=1180). This is CRITICAL for cloud placement.\n"
             f"   - assigned_voice: Analyze the character's demographic and tone, and MUST assign an EXACT string key from this available voice pool: {json.dumps(self.tts_voices_pool)}. ONLY output the exact key string (e.g. 'en-US-AriaNeural').\n"
             "4. scenes: A sequence of scenes representing the podcast dialogue. For each scene, include:\n"
             "   - character: The character currently speaking.\n"

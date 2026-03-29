@@ -107,35 +107,38 @@ class TextCloudGen:
                     bw = max_w + (pad * 2)
                     bh = total_text_h + (pad * 2)
                     
-                    # Boundary Clamping (1280x720)
-                    safe_margin = 20
+                    # Dynamic constraints using image dimensions
+                    width, height = img.width, img.height
+                    safe_margin = 40
+                    
+                    # Target positioning
                     if position == "left":
-                        # Character is on left, bubble on top-right of left side
-                        bx1, by1 = 100, 50
+                        # Character is on left, bubble offset from left edge
+                        bx1 = safe_margin + 60
+                        by1 = 50
                     else:
-                        # Character is on right, bubble on top-left of right side
-                        bx1, by1 = 1280 - 100 - bw, 50
+                        # Character is on right, bubble offset from right edge
+                        bx1 = width - safe_margin - 60 - bw
+                        by1 = 50
                     
-                    # Ensure it doesn't go off the right edge
-                    if bx1 + bw > 1280 - safe_margin:
-                        bx1 = 1280 - safe_margin - bw
-                    
-                    # Ensure it doesn't go off the left edge
+                    # Strict Boundary Clamping (Ensure 40px margin from all sides)
                     if bx1 < safe_margin:
                         bx1 = safe_margin
-                        
-                    # Ensure it doesn't go off the bottom edge
-                    if by1 + bh > 720 - safe_margin:
-                        by1 = 720 - safe_margin - bh
+                    
+                    if bx1 + bw > width - safe_margin:
+                        bx1 = width - safe_margin - bw
+                    
+                    if by1 + bh > height - safe_margin:
+                        by1 = height - safe_margin - bh
                         
                     bx2, by2 = bx1 + bw, by1 + bh
                     
                     # Draw rounded bubble (white opaque)
                     try:
-                        draw.rounded_rectangle([bx1, by1, bx2, by2], radius=20, fill=(255,255,255, 230), outline=(0,0,0,255), width=3)
+                        draw.rounded_rectangle([bx1, by1, bx2, by2], radius=20, fill=(255,255,255, 240), outline=(0,0,0,255), width=4)
                     except AttributeError:
                         # Fallback for old pillow
-                        draw.rectangle([bx1, by1, bx2, by2], fill=(255,255,255, 230), outline=(0,0,0,255), width=3)
+                        draw.rectangle([bx1, by1, bx2, by2], fill=(255,255,255, 240), outline=(0,0,0,255), width=4)
                     
                     # Draw text lines
                     cy = by1 + pad
@@ -162,6 +165,8 @@ class TextCloudGen:
                 
             if w > max_width:
                 if len(current_line) == 1:
+                    # Single word is too wide, force it onto its own line anyway
+                    # but stop adding to it.
                     lines.append(current_line[0])
                     current_line = []
                 else:
