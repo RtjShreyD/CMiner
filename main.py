@@ -104,6 +104,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="When used with --episodes continue, also runs generation chains.",
     )
 
+    subparsers.add_parser(
+        "studio",
+        help="Launch the CMiner Studio TUI (Terminal User Interface)",
+    )
+
     return parser
 
 
@@ -228,6 +233,11 @@ def _run_narrative_manga(
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args(sys.argv[1:])
+
+    if args.command == "studio":
+        from studio.app import CMinerStudioApp
+        CMinerStudioApp().run()
+        return
 
     if args.command == "openclaw":
         raise SystemExit(_run_openclaw_passthrough(args.openclaw_args))

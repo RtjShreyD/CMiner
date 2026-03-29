@@ -1,0 +1,353 @@
+/* ─── CMiner Studio — Global Stylesheet ─── */
+
+/* ─── Base Palette ─── */
+$primary: #6c5ce7;
+$primary-dim: #a29bfe;
+$accent: #00cec9;
+$accent-dim: #81ecec;
+$surface: #1e1e2e;
+$surface-light: #2d2d44;
+$surface-lighter: #3d3d5c;
+$text: #cdd6f4;
+$text-dim: #6c7086;
+$success: #a6e3a1;
+$warning: #f9e2af;
+$error: #f38ba8;
+
+/* ─── App Root ─── */
+Screen {
+    background: $surface;
+    color: $text;
+}
+
+/* ─── Header / Footer ─── */
+Header {
+    background: $primary;
+    color: white;
+    text-style: bold;
+}
+
+Footer {
+    background: $surface-light;
+}
+
+/* ─── Sidebar ─── */
+#sidebar {
+    width: 34;
+    background: $surface;
+    border-right: tall $surface-lighter;
+    padding: 0;
+}
+
+#sidebar-title {
+    background: $surface-light;
+    color: $accent;
+    text-style: bold;
+    padding: 1 2;
+    text-align: center;
+    width: 100%;
+}
+
+/* ─── Main Content ─── */
+#main-content {
+    width: 1fr;
+    padding: 0;
+}
+
+/* ─── Navigation Buttons ─── */
+.nav-btn {
+    width: 100%;
+    min-height: 3;
+    margin: 0 0 0 0;
+    padding: 0 2;
+    background: $surface;
+    color: $text;
+    border: none;
+    text-align: left;
+}
+
+.nav-btn:hover {
+    background: $surface-lighter;
+    color: $accent;
+}
+
+.nav-btn:focus {
+    background: $primary;
+    color: white;
+    text-style: bold;
+}
+
+.nav-btn.-active {
+    background: $primary;
+    color: white;
+    text-style: bold;
+    border-left: wide $accent;
+}
+
+/* ─── Agent Cards ─── */
+.agent-card {
+    background: $surface-light;
+    border: round $surface-lighter;
+    padding: 1 2;
+    margin: 1 1;
+    height: auto;
+    min-height: 7;
+}
+
+.agent-card:hover {
+    border: round $primary-dim;
+}
+
+.agent-card-title {
+    color: $accent;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.agent-card-desc {
+    color: $text-dim;
+}
+
+.agent-card-stats {
+    color: $text-dim;
+    margin-top: 1;
+}
+
+/* ─── Session Explorer ─── */
+#session-tree {
+    width: 100%;
+    height: 1fr;
+    background: $surface;
+    padding: 0 1;
+    scrollbar-size: 1 1;
+}
+
+DirectoryTree {
+    background: $surface;
+    scrollbar-size: 1 1;
+}
+
+DirectoryTree > .directory-tree--folder {
+    color: $accent;
+    text-style: bold;
+}
+
+DirectoryTree > .directory-tree--file {
+    color: $text;
+}
+
+DirectoryTree > .directory-tree--extension {
+    color: $text-dim;
+}
+
+#preview-panel {
+    width: 1fr;
+    height: 100%;
+    background: $surface;
+    border-left: tall $surface-lighter;
+    padding: 1 2;
+}
+
+#preview-title {
+    color: $accent;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#preview-content {
+    width: 100%;
+    height: 1fr;
+    background: $surface;
+}
+
+/* ─── Log Panel ─── */
+#log-panel {
+    height: 100%;
+    background: $surface;
+    padding: 0 1;
+}
+
+.log-header {
+    background: $surface-light;
+    color: $accent;
+    text-style: bold;
+    padding: 0 2;
+    height: 3;
+    content-align: center middle;
+}
+
+RichLog {
+    background: $surface;
+    scrollbar-size: 1 1;
+    padding: 0 1;
+}
+
+/* ─── Agent Launch Form ─── */
+#launch-form {
+    padding: 2;
+    height: 100%;
+    width: 100%;
+}
+
+.form-group {
+    margin-bottom: 1;
+    height: auto;
+}
+
+.form-label {
+    color: $accent;
+    text-style: bold;
+    margin-bottom: 0;
+    padding: 0 1;
+}
+
+Input {
+    background: $surface-light;
+    border: tall $surface-lighter;
+    color: $text;
+    padding: 0 1;
+}
+
+Input:focus {
+    border: tall $primary;
+}
+
+Select {
+    background: $surface-light;
+    border: tall $surface-lighter;
+    color: $text;
+}
+
+Select:focus {
+    border: tall $primary;
+}
+
+Button {
+    margin: 0 1;
+}
+
+.btn-primary {
+    background: $primary;
+    color: white;
+    text-style: bold;
+    min-width: 16;
+}
+
+.btn-primary:hover {
+    background: $primary-dim;
+    color: $surface;
+}
+
+.btn-danger {
+    background: $error;
+    color: $surface;
+    text-style: bold;
+}
+
+.btn-danger:hover {
+    background: $surface-light;
+    color: $error;
+}
+
+.btn-secondary {
+    background: $surface-lighter;
+    color: $text;
+}
+
+.btn-secondary:hover {
+    background: $surface-light;
+    color: $accent;
+}
+
+/* ─── Dashboard ─── */
+#dashboard {
+    padding: 1;
+    height: 100%;
+}
+
+#dashboard-title {
+    color: $accent;
+    text-style: bold;
+    padding: 1 2;
+    text-align: center;
+}
+
+#agent-grid {
+    layout: grid;
+    grid-size: 3;
+    grid-gutter: 1;
+    grid-rows: auto;
+    padding: 1;
+    height: auto;
+}
+
+#recent-sessions {
+    margin-top: 1;
+    padding: 1 2;
+    height: auto;
+}
+
+#recent-title {
+    color: $primary-dim;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.session-row {
+    height: 3;
+    padding: 0 2;
+    background: $surface-light;
+    margin-bottom: 0;
+}
+
+.session-row:hover {
+    background: $surface-lighter;
+}
+
+/* ─── Status Badges ─── */
+.badge-success {
+    color: $success;
+    text-style: bold;
+}
+
+.badge-warning {
+    color: $warning;
+    text-style: bold;
+}
+
+.badge-error {
+    color: $error;
+    text-style: bold;
+}
+
+/* ─── Progress ─── */
+ProgressBar {
+    margin: 1 0;
+}
+
+ProgressBar > .bar--bar {
+    color: $primary;
+}
+
+ProgressBar > .bar--complete {
+    color: $success;
+}
+
+/* ─── Scrollbar Styling ─── */
+Scrollbar {
+    background: $surface;
+    color: $surface-lighter;
+}
+
+/* ─── TabbedContent ─── */
+TabbedContent {
+    height: 100%;
+}
+
+ContentSwitcher {
+    height: 1fr;
+}
+
+TabPane {
+    padding: 0;
+}
