@@ -1,4 +1,4 @@
-# CMiner: Multi-Agent Podcast & Analysis Suite
+# CMiner - Agentic Pipelines for Content Creation through AI
 
 CMiner is a powerful multi-agent framework designed for high-quality automated content generation. It currently features specialized agents for cinematic podcasting and automated news analysis.
 
