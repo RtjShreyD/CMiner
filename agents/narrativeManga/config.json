@@ -5,6 +5,7 @@
     "scene_image_model": "models/gemini-2.5-flash-image",
     "max_image_requests": 50,
     "max_chars_per_episode": 5,
+    "max_panels_per_episode": 50,
     "max_episode_duration_mins": 5
   },
   "tts_voices_pool": {

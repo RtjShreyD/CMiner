@@ -20,6 +20,7 @@ class EpisodePlanner:
         tts_voices_pool: Dict[str, str] = None,
         max_duration_mins: int = 5,
         max_chars: int = 5,
+        max_panels: int = 15,
         art_style: str = "cinematic anime",
         tracker: Optional[LLMTracker] = None,
     ):
@@ -27,6 +28,7 @@ class EpisodePlanner:
         self.tts_voices_pool = tts_voices_pool or {}
         self.max_duration_mins = max_duration_mins
         self.max_chars = max_chars
+        self.max_panels = max_panels
         self.art_style = art_style
         self.tracker = tracker
 
@@ -106,7 +108,7 @@ class EpisodePlanner:
             f"of narrated video (~{max_words} words total dialogue).\n\n"
             f"HARD LIMITS:\n"
             f"- Maximum {self.max_chars} characters (reuse established characters when possible)\n"
-            f"- Target 8-15 panels\n"
+            f"- Target EXACTLY {self.max_panels} panels for high-quality pacing and dynamic movement\n"
             f"- Each character's visual_prompt MUST be identical across episodes for image generation consistency\n\n"
             f"Return ONLY strict JSON:\n"
             f"{{\n"

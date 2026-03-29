@@ -46,25 +46,39 @@ class LLMTracker:
 
     def save(self, session_dir: Path) -> Path:
         """Write accumulated usage to llm_usage.json in the session directory."""
-        total_input = sum(c["input_tokens"] for c in self.calls)
-        total_output = sum(c["output_tokens"] for c in self.calls)
-        models_used = sorted(set(c["model"] for c in self.calls))
+        out_path = session_dir / "llm_usage.json"
+        
+        # Load existing history if present
+        existing_calls = []
+        if out_path.exists():
+            try:
+                with open(out_path, "r") as f:
+                    old_report = json.load(f)
+                    existing_calls = old_report.get("calls", [])
+            except Exception as e:
+                print(f"Warning: Could not load existing usage report: {e}")
+
+        # Merge unique new calls
+        all_calls = existing_calls + self.calls
+
+        total_input = sum(c["input_tokens"] for c in all_calls)
+        total_output = sum(c["output_tokens"] for c in all_calls)
+        models_used = sorted(set(c["model"] for c in all_calls))
 
         report = {
-            "total_calls": len(self.calls),
+            "total_calls": len(all_calls),
             "total_input_tokens": total_input,
             "total_output_tokens": total_output,
             "total_tokens": total_input + total_output,
             "models_used": models_used,
-            "calls": self.calls,
+            "calls": all_calls,
         }
 
-        out_path = session_dir / "llm_usage.json"
         with open(out_path, "w") as f:
             json.dump(report, f, indent=2)
 
         print(f"LLM Usage Report saved → {out_path}")
-        print(f"  Total calls: {len(self.calls)}  |  Tokens: {total_input} in / {total_output} out")
+        print(f"  Total calls: {len(all_calls)}  |  Tokens: {total_input} in / {total_output} out")
         return out_path
 
     # ── summary ────────────────────────────────────────────────

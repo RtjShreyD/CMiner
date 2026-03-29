@@ -64,6 +64,7 @@ def main():
     scene_image_model = models_config.get("scene_image_model", "models/gemini-2.5-flash-image")
     max_image_requests = models_config.get("max_image_requests", 50)
     max_chars = models_config.get("max_chars_per_episode", 5)
+    max_panels = models_config.get("max_panels_per_episode", 15)
     max_duration = models_config.get("max_episode_duration_mins", 5)
     tts_voices_pool = config.get("tts_voices_pool", {})
     video_config = config.get("video", {})
@@ -107,6 +108,7 @@ def main():
             tts_voices_pool=tts_voices_pool,
             max_duration_mins=max_duration,
             max_chars=max_chars,
+            max_panels=max_panels,
             art_style=art_style,
             tracker=tracker,
         )
