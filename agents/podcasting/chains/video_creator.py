@@ -49,7 +49,7 @@ class VideoCreator:
                     "-loop", "1", "-i", str(frame_path), 
                     "-framerate", "24", "-i", f"{overlay_dir}/frame_%04d.png",
                     "-i", audio_path,
-                    "-filter_complex", "[0:v][1:v]overlay=shortest=1,format=yuv420p",
+                    "-filter_complex", "[0:v]scale=1280:720[bg];[bg][1:v]overlay=shortest=1,format=yuv420p",
                     "-c:v", "libx264", "-c:a", "aac", "-shortest", str(seg_path)
                 ], check=True, capture_output=True)
             else:

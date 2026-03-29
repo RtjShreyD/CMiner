@@ -28,7 +28,8 @@ class CharacterGen:
         base_scene_prompt = (
             f"Anime podcast setup. {setup_prompt}. "
             f"Characters present: {chars_desc_str}. "
-            "Studio ghibli or ufotable aesthetic, professional lighting, cinematic composition."
+            "Studio ghibli or ufotable aesthetic, professional lighting, cinematic composition. "
+            "CRITICAL: Generate in 16:9 aspect ratio, 1280x720 resolution standard."
         )
         
         # 1. Generate Base Scene (or use attached)
@@ -81,7 +82,9 @@ class CharacterGen:
                         "mime_type": "image/png",
                         "data": image_bytes
                     },
-                    f"Refining the attached scene. {setup_prompt}. Character consistency is CRITICAL. {alt_prompt}. Maintain identical art style and character faces."
+                    f"Refining the attached scene. {setup_prompt}. Character consistency is CRITICAL. {alt_prompt}. "
+                    "Maintain identical art style and character faces. "
+                    "CRITICAL: Keep 16:9 aspect ratio, 1280x720 resolution standard."
                 ])
                 
                 image_data = None
@@ -92,6 +95,12 @@ class CharacterGen:
                 
                 if image_data:
                     alt_path.write_bytes(image_data)
+                    # Force resize to 1280x720 to avoid text cloud clipping
+                    with Image.open(alt_path) as img:
+                        if img.size != (1280, 720):
+                            print(f"Resizing alteration from {img.size} to (1280, 720)")
+                            img = img.resize((1280, 720), Image.Resampling.LANCZOS)
+                        img.save(alt_path)
                     print(f"Successfully generated alteration: {alt_path.name}")
                 else:
                     raise ValueError("No image returned from multimodal prompt.")
@@ -122,6 +131,12 @@ class CharacterGen:
             
             if image_data:
                 out_path.write_bytes(image_data)
+                # Force resize to 1280x720 to avoid text cloud clipping
+                with Image.open(out_path) as img:
+                    if img.size != (1280, 720):
+                        print(f"Resizing base scene from {img.size} to (1280, 720)")
+                        img = img.resize((1280, 720), Image.Resampling.LANCZOS)
+                    img.save(out_path)
                 print(f"Successfully generated: {out_path.name}")
             else:
                 raise ValueError("No inline_data found.")
