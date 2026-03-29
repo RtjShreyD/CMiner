@@ -17,6 +17,7 @@ from textual.widgets import (
 )
 
 from studio.widgets.image_preview import ImagePreview
+from studio.widgets.video_preview import VideoPreview
 
 
 from rich.syntax import Syntax
@@ -149,6 +150,7 @@ class SessionExplorerPanel(Widget):
                     )
                 with VerticalScroll(id="preview-body"):
                     yield ImagePreview(id="img-preview")
+                    yield VideoPreview(id="vid-preview")
                     yield RichLog(
                         highlight=True,
                         markup=True,
@@ -158,6 +160,7 @@ class SessionExplorerPanel(Widget):
 
     def on_mount(self) -> None:
         self.query_one("#img-preview").display = False
+        self.query_one("#vid-preview").display = False
         self.query_one("#text-preview").display = False
 
     def on_directory_tree_file_selected(
@@ -171,16 +174,21 @@ class SessionExplorerPanel(Widget):
 
         category = _file_category(path)
         img_preview = self.query_one("#img-preview", ImagePreview)
+        vid_preview = self.query_one("#vid-preview", VideoPreview)
         text_preview = self.query_one("#text-preview", RichLog)
         open_btn = self.query_one("#open-external-btn", Button)
         copy_btn = self.query_one("#copy-text-btn", Button)
 
         # Reset
         img_preview.display = False
+        vid_preview.display = False
         text_preview.display = False
         open_btn.disabled = True
         copy_btn.disabled = True
         self._current_text = ""
+        
+        # Stop any running video
+        vid_preview.stop()
 
         if category == "image":
             img_preview.display = True
@@ -219,14 +227,20 @@ class SessionExplorerPanel(Widget):
                 text_preview.write(f"[red]Error reading file: {e}[/red]")
 
         elif category == "media":
-            text_preview.display = True
-            text_preview.clear()
-            size_mb = path.stat().st_size / (1024 * 1024)
-            text_preview.write(f"[bold]{path.name}[/bold]")
-            text_preview.write(f"Type: {path.suffix.upper()} media file")
-            text_preview.write(f"Size: {size_mb:.1f} MB")
-            text_preview.write("")
-            text_preview.write("[dim]Click 'Open ↗' to play in your system player.[/dim]")
+            # Check if it's a video/gif we can play in TUI
+            if path.suffix.lower() in (".mp4", ".gif", ".mov", ".avi", ".mkv"):
+                vid_preview.display = True
+                vid_preview.load(str(path))
+            else:
+                # Audio or other media: show info and open button
+                text_preview.display = True
+                text_preview.clear()
+                size_mb = path.stat().st_size / (1024 * 1024)
+                text_preview.write(f"[bold]{path.name}[/bold]")
+                text_preview.write(f"Type: {path.suffix.upper()} media file")
+                text_preview.write(f"Size: {size_mb:.1f} MB")
+                text_preview.write("")
+                text_preview.write("[dim]Click 'Open ↗' to play in your system player.[/dim]")
             open_btn.disabled = False
 
         else:
