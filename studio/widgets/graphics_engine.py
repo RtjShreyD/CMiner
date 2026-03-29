@@ -34,19 +34,34 @@ class GraphicsEngine:
                 # Dynamically choose the best renderer for this image/terminal combo
                 timg = AutoImage(img)
 
-                # Set sizes. Note: Term-image uses cell dimensions.
-                # If width is provided externally (from Textual widget), use it.
-                if width > 0:
-                    render_w = width
-                else:
-                    render_w = self._max_width
+                # Provide appropriate width based on Textual widget constraints
+                render_w = width if width > 0 else self._max_width
 
-                # timg uses (columns, lines) for size.
-                # If we don't set height, it preserves aspect ratio.
-                timg.set_size(columns=render_w)
+                # Calculate height proportional to terminal aspect ratio (character is ~1:2)
+                # Setting both width & height explicitly bypasses term-image's internal
+                # checks against the active terminal bounds, which fail inside Textual.
+                w, h = img.size
+                
+                # Protect against Textual layout lifecycle passing <= 0 widths temporarily
+                safe_render_w = max(10, render_w) 
+                
+                render_h = max(1, int((h / w) * safe_render_w * 0.5))
+                timg.set_size(width=safe_render_w, height=render_h)
 
                 # term-image provides a __str__ that returns ANSI
-                return timg, metadata
+                # We bypass __str__ directly to prevent terminal window bounds matching
+                # which causes crashes if the Textual layout is still calculating dimensions.
+                try:
+                    ansi_render = timg._renderer(
+                        timg._render_image, 
+                        getattr(timg, '_ALPHA_THRESHOLD', None), 
+                        check_size=False
+                    )
+                except AttributeError:
+                    # Fallback if internal API changes
+                    ansi_render = str(timg)
+                    
+                return ansi_render, metadata
 
         except Exception as e:
             return f"[red]Graphics Engine Error: {e}[/red]", {}

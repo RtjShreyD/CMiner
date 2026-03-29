@@ -47,9 +47,9 @@ The application will launch via `cminer` or `python3 main.py --tui`.
 ### Proposed Layout
 ```text
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ CMINER STUDIO ⚡ 1 Active Job    [Dashboard] [Agents] [Media] [Config]    │
+│ CMINER STUDIO ⚡ 1 Active Job    [Dashboard] [Agents] [Media] [Config]   │
 ├───────────────┬─────────────────────────────────────────────────────────┤
-│ 📂 SESSIONS   │ 🎬 AGENT: NarrativeManga                                │
+│ 📂 SESSIONS   │ 🎬 AGENT: NarrativeManga                                |
 │ ▼ manga_001   │                                                         │
 │   ├─ chars    │  Status: [|||||||||||||||||||      ] 70% Scene Gen      │
 │   ├─ scenes   │  Budget: 12/50 Images Used                              │
@@ -59,8 +59,8 @@ The application will launch via `cminer` or `python3 main.py --tui`.
 ├───────────────┼─────────────────────────────────────────────────────────┤
 │ 🛠️ TOOLS     │ 🖼️ MEDIA PREVIEW (textual-imageview / chafa)            │
 │  [New Agent]  │                                                         │
-│  [Scheduler]  │      ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿      │
-│  [A/V Editor] │      ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿      │
+│  [Scheduler]  │      ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿                           │
+│  [A/V Editor] │      ⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿                           │
 │               │                                                         │
 └───────────────┴─────────────────────────────────────────────────────────┘
 ```

@@ -19,6 +19,8 @@ from textual.widgets import (
 from studio.widgets.image_preview import ImagePreview
 
 
+from rich.syntax import Syntax
+
 # ─── File type helpers ────────────────────────────────────────
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
@@ -42,11 +44,9 @@ class FilteredDirectoryTree(DirectoryTree):
     """Custom DirectoryTree that shows everything and handles expansion better."""
 
     def filter_paths(self, paths: list[Path]) -> list[Path]:
-        # Include everything, including hidden files
         return [p for p in paths if not p.name.startswith("__")]
 
     def on_mount(self) -> None:
-        # Sort folders first (optional but nice)
         pass
 
 
@@ -100,8 +100,9 @@ class SessionExplorerPanel(Widget):
         width: 100%;
     }
 
-    #open-external-btn {
+    .header-btn {
         dock: right;
+        margin-left: 1;
     }
 
     #refresh-btn {
@@ -115,6 +116,7 @@ class SessionExplorerPanel(Widget):
         super().__init__(**kwargs)
         self._outputs_dir = Path(outputs_dir) if outputs_dir else Path.cwd() / "outputs"
         self._selected_path: Path | None = None
+        self._current_text: str = ""
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="explorer-container"):
@@ -132,9 +134,16 @@ class SessionExplorerPanel(Widget):
                 with Horizontal(id="preview-header"):
                     yield Static("Select a file to preview", id="preview-filename")
                     yield Button(
+                        "📄 Copy Text",
+                        variant="primary",
+                        classes="btn-primary header-btn",
+                        id="copy-text-btn",
+                        disabled=True,
+                    )
+                    yield Button(
                         "Open ↗",
                         variant="default",
-                        classes="btn-secondary",
+                        classes="btn-secondary header-btn",
                         id="open-external-btn",
                         disabled=True,
                     )
@@ -148,7 +157,6 @@ class SessionExplorerPanel(Widget):
                     )
 
     def on_mount(self) -> None:
-        # Hide both previews until a file is selected
         self.query_one("#img-preview").display = False
         self.query_one("#text-preview").display = False
 
@@ -165,30 +173,48 @@ class SessionExplorerPanel(Widget):
         img_preview = self.query_one("#img-preview", ImagePreview)
         text_preview = self.query_one("#text-preview", RichLog)
         open_btn = self.query_one("#open-external-btn", Button)
+        copy_btn = self.query_one("#copy-text-btn", Button)
 
         # Reset
         img_preview.display = False
         text_preview.display = False
         open_btn.disabled = True
+        copy_btn.disabled = True
+        self._current_text = ""
 
         if category == "image":
             img_preview.display = True
             img_preview.load(str(path))
+            open_btn.disabled = False
 
         elif category == "text":
             text_preview.display = True
             text_preview.clear()
+            copy_btn.disabled = False
+            open_btn.disabled = False
             try:
                 content = path.read_text(encoding="utf-8", errors="replace")
+                self._current_text = content
                 if path.suffix.lower() == ".json":
                     try:
                         parsed = json.loads(content)
                         content = json.dumps(parsed, indent=2)
+                        self._current_text = content
                     except json.JSONDecodeError:
                         pass
+                
                 if len(content) > 50_000:
-                    content = content[:50_000] + "\n\n[dim]... (truncated)[/dim]"
-                text_preview.write(content)
+                    content = content[:50_000] + "\n\n... (truncated for display)"
+                
+                # Use syntax highlighting if appropriate
+                syntax_map = {".json": "json", ".py": "python", ".yaml": "yaml", ".md": "markdown"}
+                lang = syntax_map.get(path.suffix.lower())
+                
+                if lang:
+                    text_preview.write(Syntax(content, lang, theme="monokai", word_wrap=True))
+                else:
+                    text_preview.write(content)
+
             except Exception as e:
                 text_preview.write(f"[red]Error reading file: {e}[/red]")
 
@@ -215,6 +241,11 @@ class SessionExplorerPanel(Widget):
             tree.reload()
             self.app.notify("Tree refreshed", severity="information")
 
+        elif event.button.id == "copy-text-btn":
+            if self._current_text:
+                self.app.copy_to_clipboard(self._current_text)
+                self.app.notify("File contents copied to clipboard!", severity="information")
+                
         elif event.button.id == "open-external-btn":
             if self._selected_path and self._selected_path.exists():
                 try:
