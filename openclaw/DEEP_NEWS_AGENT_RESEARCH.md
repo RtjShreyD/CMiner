@@ -37,13 +37,22 @@ Implemented in this workspace
 - AGENTS policy customized for deep-news behavior.
 
 2) Generator pipeline
-- Script: tools/newsdesk/run_newsdesk.py
+- Script: agents/newsdesk/run_newsdesk.py
 - Outputs:
   - outputs/<7-digit-session-id>/final.md
   - outputs/<7-digit-session-id>/newspaper.html
   - outputs/<7-digit-session-id>/report_data.json
   - outputs/<7-digit-session-id>/raw_openclaw_response.json
   - outputs/<7-digit-session-id>/images/*
+
+3) Podcasting Pipeline (Integrated)
+- Agent: podcaster
+- Runner: agents/podcasting/run.py (Modular Workflow)
+- Features: 
+  - Modular `--step` control (planner, images, clouds, tts, video).
+  - Subject-locked character consistency via **Multimodal Reference Frame** generation.
+  - Real-time text cloud overlays with boundary-clamped synchronization.
+  - Asset-aware planning (uses CLI `--char` and `--scene` images as base anchors).
 
 3) Fallback architecture
 - Primary mode: OpenClaw autonomous deep research with strict JSON output.

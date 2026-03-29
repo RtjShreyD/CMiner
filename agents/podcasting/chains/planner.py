@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 from typing import Dict, Any
-from tools.podcasting.utils import get_model
+from agents.podcasting.utils import get_model
 
 
 class Planner:
@@ -9,12 +9,25 @@ class Planner:
         self.model_name = model_name
         self.tts_voices_pool = tts_voices_pool or {}
 
-    def run(self, user_prompt: str, session_dir: Path) -> Dict[str, Any]:
+    def run(self, user_prompt: str, session_dir: Path, attached_chars: list = None, attached_scene: str = None) -> Dict[str, Any]:
         print(f"--- Pipeline: Planner ---")
+        attached_chars = attached_chars or []
+        
+        # Build context about attached images
+        image_context = ""
+        if attached_scene:
+            image_context += f"- Attached Scene Image: {attached_scene}\n"
+        if attached_chars:
+            image_context += f"- Attached Character Images: {', '.join(attached_chars)}\n"
+
         prompt = (
             f"You are a master storyboard artist and podcast producer. Based on the user prompt: '{user_prompt}', "
-            "create a cinematic and engaging storyboard.json for a text-to-video pipeline formatted as a podcast. "
-            "Ensure the character designs are visually distinct and suitable for high-quality anime generation.\n\n"
+            "create a cinematic and engaging storyboard.json for a text-to-video pipeline formatted as a podcast.\n\n"
+            f"CONTEXT: The user has attached the following visual assets via CLI:\n{image_context}\n"
+            "INSTRUCTIONS:\n"
+            "1. If an 'Attached Scene Image' is provided, your 'podcast_setup_prompt' MUST describe this specific scene as the 'Base Anchor'. Do not invent a new environment; base all scene alterations on this provided background.\n"
+            "2. If 'Attached Character Images' are provided, you MUST map them to the characters in your storyboard (e.g. Character 1 uses the first attached image). Your 'prompt' for these characters should be a concise description derived from what you imagine those images contain, or simply refer to them as 'Attached Char X'.\n"
+            "3. Ensure the character designs are visually distinct and suitable for high-quality anime generation.\n\n"
             "The storyboard should include:\n"
             "1. title: A suitable title for the video.\n"
             "2. podcast_setup_prompt: A highly detailed prompt describing the overall podcast scene with characters, a table, and mics (e.g., 'An anime style radio studio, two characters sitting across a wooden table with professional microphones, soft neon lighting, studio monitors, high quality, highly detailed, vibrant colors').\n"

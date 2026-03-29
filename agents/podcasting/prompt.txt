@@ -1,0 +1,9 @@
+A dramatic, high-tension cinematic anime debate set in a dystopian Neo-Tokyo spanning a neon-lit skyscraper rooftop during a pouring rainstorm. The aesthetic must be high-quality 2D cel-shaded anime style, featuring dynamic lighting, glowing holographic billboards, and sharp vivid colors.
+
+The two characters are locked in an emotional, high-stakes ideological battle:
+1. Kaelen: A hardened, cybernetically enhanced mercenary. He is rugged, with messy dark hair, glowing teal optical cybernetics over his left eye, and wearing heavily weathered, bulky dark-grey tactical armor. He represents raw humanity, emotion, and the fear of losing free will.
+2. Aria: A brilliant, elegant bio-engineer. She possesses long, flowing silver hair, piercing crimson eyes, and wears a pristine white and gold futuristic trench coat interlaced with red holographic data streams. She represents perfect logic, evolution, and assimilation into 'The Nexus'.
+
+The debate is over whether the remaining human population should upload their consciousness into "The Nexus," a hyper-intelligence. Aria insists it is the only way to save humanity from self-destruction and achieve ascended peace. Kaelen fiercely argues that pain, flaws, and the struggle to survive are precisely what make them human, and uploading themselves is just a comfortable form of extinction.
+
+The dialogue should be fast-paced, emotionally charged, and deeply philosophical, fitting an epic anime confrontation. Make sure the visual descriptions for the LLM focus heavily on anime aesthetics, neon reflections in the puddles, and dramatic weather.

@@ -1,4 +1,4 @@
-"""CMiner root CLI for managing and running agents."""
+"""CMiner root CLI for managing and running functools."""
 
 from __future__ import annotations
 
@@ -16,14 +16,6 @@ def _load_root_config() -> dict[str, Any]:
     cfg_path = ROOT / "config.json"
     return json.loads(cfg_path.read_text(encoding="utf-8"))
 
-
-    parser.add_argument("--target-agent", default="newsAligator", help="Target agent used by rootAgent")
-    parser.add_argument(
-        "--use-nemoclaw",
-        action="store_true",
-        help="When running rootAgent, route orchestration to nemoclawAgent",
-    )
-    return parser.parse_args(argv)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -66,13 +58,18 @@ def _build_parser() -> argparse.ArgumentParser:
     
     podcasting_parser = subparsers.add_parser(
         "podcasting",
-        help="Run OpenClaw podcasting report pipeline",
-        description="Run OpenClaw podcasting report pipeline",
+        help="Run podcasting agent pipeline",
+        description="Run podcasting agent pipeline (Modular Step-by-Step or End-to-End)",
     )
     podcasting_parser.add_argument("--workspace", default=".", help="Workspace root")
     podcasting_parser.add_argument("--agent", default="podcaster", help="OpenClaw agent id")
     podcasting_parser.add_argument("--openclaw-bin", default="openclaw", help="OpenClaw binary path")
-    podcasting_parser.add_argument("--prompt", required=True, help="User prompt for the podcast")
+    podcasting_parser.add_argument("--prompt", help="User prompt for the podcast")
+    podcasting_parser.add_argument("--script", help="Path to a script text file")
+    podcasting_parser.add_argument("--char", action="append", help="Path to a character image (up to 3)")
+    podcasting_parser.add_argument("--scene", help="Path to a scene background image")
+    podcasting_parser.add_argument("--step", choices=["all", "planner", "images", "audio", "clouds", "video"], default="all", help="Execute specific pipeline step")
+    podcasting_parser.add_argument("--session", help="Continue work in an existing session directory")
     podcasting_parser.add_argument(
         "--thinking",
         choices=["off", "minimal", "low", "medium", "high", "xhigh"],
@@ -99,7 +96,7 @@ def _run_newsdesk(
     thinking: str,
     insta_count: int,
 ) -> int:
-    script = ROOT / "tools" / "newsdesk" / "run_newsdesk.py"
+    script = ROOT / "agents" / "newsdesk" / "run_newsdesk.py"
     cmd = [
         sys.executable,
         str(script),
@@ -126,26 +123,42 @@ def _run_podcasting(
     workspace: str,
     agent: str,
     openclaw_bin: str,
-    prompt: str,
+    prompt: str | None,
     thinking: str,
+    script: str | None = None,
+    char: list[str] | None = None,
+    scene: str | None = None,
+    step: str = "all",
+    session: str | None = None,
 ) -> int:
-    script = ROOT / "tools" / "podcasting" / "run.py"
+    runner_link = ROOT / "agents" / "podcasting" / "run.py"
     venv_python = ROOT / ".venv" / "bin" / "python3"
     
     cmd = [
         str(venv_python) if venv_python.exists() else sys.executable,
-        str(script),
+        str(runner_link),
         "--workspace",
         workspace,
         "--agent",
         agent,
         "--openclaw-bin",
         openclaw_bin,
-        "--prompt",
-        prompt,
         "--thinking",
         thinking,
+        "--step",
+        step,
     ]
+    if prompt:
+        cmd.extend(["--prompt", prompt])
+    if script:
+        cmd.extend(["--script", script])
+    if char:
+        for c in char:
+            cmd.extend(["--char", c])
+    if scene:
+        cmd.extend(["--scene", scene])
+    if session:
+        cmd.extend(["--session", session])
     proc = subprocess.run(cmd, check=False)
     return proc.returncode
 
@@ -178,6 +191,11 @@ def main() -> None:
                 openclaw_bin=args.openclaw_bin,
                 prompt=args.prompt,
                 thinking=args.thinking,
+                script=args.script,
+                char=args.char,
+                scene=args.scene,
+                step=args.step,
+                session=args.session,
             )
         )
 

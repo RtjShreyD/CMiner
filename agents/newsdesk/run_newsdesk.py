@@ -81,7 +81,7 @@ def build_prompt(hours: int, article_count: int) -> str:
 def build_fallback_prompt(hours: int, article_count: int) -> str:
     section_csv = ", ".join(DEFAULT_SECTIONS)
     return (
-        "Do not use key-gated web_search tools. "
+        "Do not use key-gated web_search functools. "
         "Perform deep reading by browsing/fetching directly from major news homepages and article pages. "
         "Use a diverse source mix and focus on breaking developments. "
         f"Time window: last {hours} hours. "

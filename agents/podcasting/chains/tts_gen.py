@@ -4,7 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Dict, Any, List
-from tools.podcasting.utils import get_model
+from agents.podcasting.utils import get_model
 
 try:
     from google.cloud import texttospeech

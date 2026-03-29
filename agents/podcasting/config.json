@@ -1,12 +1,8 @@
 {
   "models": {
     "planner_model": "models/gemini-flash-latest",
-    "character_image_model": "models/nano-banana-2",
-    "_comment_other_image_models": [
-      "models/nano-banana",
-      "models/nano-banana-pro"
-    ],
-    "character_text_model": "models/gemini-flash-latest",
+    "character_image_model": "models/gemini-2.5-flash-image",
+    "character_text_model": "models/gemini-1.5-flash-8b",
     "max_image_generations": 15
   },
   "tts_voices_pool": {

@@ -4,13 +4,15 @@ import os
 from pathlib import Path
 from typing import Dict, Any, List
 from PIL import Image
-from tools.podcasting.utils import get_model
+from agents.podcasting.utils import get_model
 
 class CharacterGen:
-    def __init__(self, image_model_name: str = "models/gemini-2.5-flash-image", text_model_name: str = "models/gemini-flash-latest", max_generations: int = 15):
+    def __init__(self, image_model_name: str = "models/gemini-2.5-flash-image", text_model_name: str = "models/gemini-flash-latest", max_generations: int = 15, attached_chars: list = None, attached_scene: str = None):
         self.image_model_name = image_model_name
         self.text_model_name = text_model_name
         self.max_generations = max_generations
+        self.attached_chars = attached_chars or []
+        self.attached_scene = attached_scene
 
     def run(self, storyboard: Dict[str, Any], session_dir: Path) -> Dict[str, Any]:
         print(f"--- Pipeline: Scene & Character Generation ---")
@@ -29,9 +31,19 @@ class CharacterGen:
             "Studio ghibli or ufotable aesthetic, professional lighting, cinematic composition."
         )
         
-        print("Generating base scene...")
+        # 1. Generate Base Scene (or use attached)
         base_scene_path = out_dir / "base_scene.png"
-        self._generate_image(base_scene_prompt, base_scene_path)
+        if self.attached_scene:
+            try:
+                import shutil
+                shutil.copy(self.attached_scene, base_scene_path)
+                print(f"Using attached scene image: {self.attached_scene}")
+            except Exception as e:
+                print(f"Error copying attached scene: {e}, falling back to generation.")
+                self._generate_image(base_scene_prompt, base_scene_path)
+        else:
+            print("Generating base scene...")
+            self._generate_image(base_scene_prompt, base_scene_path)
         
         # 2. Extract unique alteration prompts
         unique_alterations = []
@@ -52,15 +64,42 @@ class CharacterGen:
             alt_name = f"alteration_{i:02d}"
             print(f"Generating alteration: {alt_name}")
             
-            full_alt_prompt = (
-                f"Anime podcast setup. {setup_prompt}. "
-                f"Characters present: {chars_desc_str}. "
-                f"ATTENTION TO DETAIL: {alt_prompt}. "
-                "Maintain exactly the same art style, lighting, and character designs as much as possible."
-            )
-            
             alt_path = out_dir / f"{alt_name}.png"
-            self._generate_image(full_alt_prompt, alt_path)
+            # PRO-TIP: We provide the base scene as the first part of the message to ensure subject consistency
+            # Gemini 1.5/2.5 Flash Image models can anchor to this reference.
+            model = get_model(self.image_model_name)
+            
+            try:
+                # Load base image as bytes
+                with open(base_scene_path, 'rb') as f:
+                    image_bytes = f.read()
+                
+                # Construct multimodal request: [Image, Prompt]
+                # This ensures the model 'sees' the base characters/layout before generating the variation.
+                response = model.generate_content([
+                    {
+                        "mime_type": "image/png",
+                        "data": image_bytes
+                    },
+                    f"Refining the attached scene. {setup_prompt}. Character consistency is CRITICAL. {alt_prompt}. Maintain identical art style and character faces."
+                ])
+                
+                image_data = None
+                for part in response.candidates[0].content.parts:
+                    if part.inline_data:
+                        image_data = part.inline_data.data
+                        break
+                
+                if image_data:
+                    alt_path.write_bytes(image_data)
+                    print(f"Successfully generated alteration: {alt_path.name}")
+                else:
+                    raise ValueError("No image returned from multimodal prompt.")
+                
+            except Exception as e:
+                print(f"Consistency generation failed for alteration {i}, falling back to text-only: {e}")
+                self._generate_image(full_alt_prompt, alt_path)
+
             alterations_map[alt_prompt] = str(alt_path)
         
         # Save map

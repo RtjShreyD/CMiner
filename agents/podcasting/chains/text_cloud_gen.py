@@ -60,9 +60,13 @@ class TextCloudGen:
             
             print(f"Generating {total_frames} text cloud frames for scene {i} ({speaker} on {position})")
             
+            # Fine-tune sync: Subtract a small offset (in 100ns units) if the text feels late.
+            # 500,000 units = 50ms.
+            SYNC_OFFSET_UNITS = 200000 
+            
             for frame_idx in range(total_frames):
                 current_time_sec = frame_idx / self.fps
-                current_time_units = current_time_sec * 10000000
+                current_time_units = (current_time_sec * 10000000) + SYNC_OFFSET_UNITS
                 
                 # Active spoken words up to this current time
                 # Keep sliding window of words to fit in bubble nicely, e.g. last 15 words.
@@ -103,12 +107,26 @@ class TextCloudGen:
                     bw = max_w + (pad * 2)
                     bh = total_text_h + (pad * 2)
                     
+                    # Boundary Clamping (1280x720)
+                    safe_margin = 20
                     if position == "left":
                         # Character is on left, bubble on top-right of left side
                         bx1, by1 = 100, 50
                     else:
                         # Character is on right, bubble on top-left of right side
                         bx1, by1 = 1280 - 100 - bw, 50
+                    
+                    # Ensure it doesn't go off the right edge
+                    if bx1 + bw > 1280 - safe_margin:
+                        bx1 = 1280 - safe_margin - bw
+                    
+                    # Ensure it doesn't go off the left edge
+                    if bx1 < safe_margin:
+                        bx1 = safe_margin
+                        
+                    # Ensure it doesn't go off the bottom edge
+                    if by1 + bh > 720 - safe_margin:
+                        by1 = 720 - safe_margin - bh
                         
                     bx2, by2 = bx1 + bw, by1 + bh
                     

@@ -58,7 +58,7 @@ Run
   openclaw gateway --allow-unconfigured
 
 2) Run the generator from repository root:
-  python3 tools/newsdesk/run_newsdesk.py --workspace . --agent newsaligator --hours 24 --articles 12 --thinking high --insta-count 5
+  python3 agents/newsdesk/run_newsdesk.py --workspace . --agent newsaligator --hours 24 --articles 12 --thinking high --insta-count 5
 
   or from root CLI:
   python3 main.py newsdesk --workspace . --agent newsaligator --hours 24 --articles 12 --thinking high --insta-count 5
