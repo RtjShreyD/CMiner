@@ -91,8 +91,10 @@ class ImagePreview(Static):
                 self.query_one("#img-meta", Static).update(meta_text)
 
                 # Update render area
-                # For term-image, result is the image object. String conversion gives ANSI.
-                self.query_one("#img-render", Static).update(str(result))
+                # For Chafa, result is the ANSI string. 
+                # We wrap it in Text.from_ansi to preserve colors/protocols for Rich.
+                from rich.text import Text
+                self.query_one("#img-render", Static).update(Text.from_ansi(result))
 
         except Exception as e:
             self.query_one("#img-render", Static).update(f"[red]Rendering Error: {e}[/red]")

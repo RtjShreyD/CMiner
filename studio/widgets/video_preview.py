@@ -135,7 +135,7 @@ class VideoPreview(Vertical):
 
         # Render with Chafa
         canvas = chafa.Canvas(self._chafa_config)
-        canvas.draw_all_pixels(chafa.PixelType.CHAFA_PIXEL_RGBA8_UNASSOCIATED, pixels, w, h, w * 4)
+        canvas.draw_all_pixels(chafa.PixelMode.RGBA8, pixels, w, h, w * 4)
         ansi_output = canvas.print().decode("utf-8")
 
         # Update TUI

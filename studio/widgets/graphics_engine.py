@@ -68,7 +68,7 @@ class GraphicsEngine:
                 # Draw pixels to canvas
                 pixels = img.tobytes()
                 canvas.draw_all_pixels(
-                    chafa.PixelType.CHAFA_PIXEL_RGBA8_UNASSOCIATED,
+                    chafa.PixelMode.RGBA8,
                     pixels,
                     w,
                     h,

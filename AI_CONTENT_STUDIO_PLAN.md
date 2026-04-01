@@ -96,3 +96,13 @@ When you are ready to begin, we will:
 1. `pip install textual rich-pixels apscheduler ffmpeg-python`
 2. Create a new entry point, e.g., `studio.py`, to keep the standard CLI (`main.py`) intact while we build the TUI.
 3. Begin Phase 1 by bootstrapping the Textual App shell.
+
+-----------------
+
+Automate this workflow for a series- 
+
+AiSharkTank - 
+
+- Ai will create a sci fi invention and present it before Khuda
+- Khuda, shares expressions as Judge
+- You may take Khuda as a set
