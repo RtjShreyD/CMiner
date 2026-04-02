@@ -5,23 +5,20 @@ import types
 from pathlib import Path
 from unittest import mock
 
-# Stub the google.generativeai module used by narrativeManga.utils
+# Stub the google.genai module used by narrativeManga.utils
 google = types.ModuleType("google")
-generativeai = types.ModuleType("google.generativeai")
+genai = types.ModuleType("google.genai")
 
-def configure(api_key=None):
-    return None
-
-class GenerativeModel:
-    def __init__(self, model_name):
-        self.model_name = model_name
-
-    def generate_content(self, contents):
+class _Models:
+    def generate_content(self, model=None, contents=None):
         return None
 
-setattr(generativeai, "configure", configure)
-setattr(generativeai, "GenerativeModel", GenerativeModel)
-setattr(google, "generativeai", generativeai)
+class Client:
+    def __init__(self, api_key=None):
+        self.models = _Models()
+
+setattr(genai, "Client", Client)
+setattr(google, "genai", genai)
 
 # Stub dotenv
 dotenv = types.ModuleType("dotenv")
@@ -30,7 +27,7 @@ def load_dotenv():
 setattr(dotenv, "load_dotenv", load_dotenv)
 
 sys.modules["google"] = google
-sys.modules["google.generativeai"] = generativeai
+sys.modules["google.genai"] = genai
 sys.modules["dotenv"] = dotenv
 
 from agents.narrativeManga.chains.episode_planner import EpisodePlanner

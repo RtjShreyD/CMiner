@@ -24,6 +24,7 @@ class EpisodePlanner:
         art_style: str = "cinematic anime",
         theme: str = None,
         episode_mode: bool = True,
+        target_episode: int | None = None,
         tracker: Optional[LLMTracker] = None,
     ):
         self.model_name = model_name
@@ -34,6 +35,7 @@ class EpisodePlanner:
         self.art_style = art_style
         self.theme = theme
         self.episode_mode = episode_mode
+        self.target_episode = target_episode
         self.tracker = tracker
 
     def run(self, base_prompt: str, session_dir: Path) -> Dict[str, Any]:
@@ -44,18 +46,28 @@ class EpisodePlanner:
         # Determine next episode number
         existing = sorted(
             [d for d in episodes_dir.iterdir() if d.is_dir() and d.name.startswith("episode")],
-            key=lambda p: p.name,
+            key=lambda p: int(p.name.replace("episode", "") or 0),
         )
-        next_num = len(existing) + 1 if self.episode_mode else 1
+        if self.target_episode is not None:
+            next_num = max(1, int(self.target_episode))
+        else:
+            next_num = len(existing) + 1 if self.episode_mode else 1
         is_first = next_num == 1
 
         # Gather prior episode context for continuity
         prior_context = ""
         established_chars = []
-        if existing and self.episode_mode:
-            last_ep_dir = existing[-1]
-            last_board = last_ep_dir / "manga-board.json"
-            if last_board.exists():
+        if self.episode_mode:
+            prior_ep_dir = None
+            if next_num > 1:
+                explicit_prior = episodes_dir / f"episode{next_num - 1}"
+                if explicit_prior.exists():
+                    prior_ep_dir = explicit_prior
+            elif existing:
+                prior_ep_dir = existing[-1]
+
+            last_board = (prior_ep_dir / "manga-board.json") if prior_ep_dir else None
+            if last_board and last_board.exists():
                 with open(last_board, "r") as f:
                     prev = json.load(f)
                 established_chars = prev.get("characters", [])

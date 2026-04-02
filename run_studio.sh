@@ -5,10 +5,9 @@
 
 echo "Starting CMiner Web Studio Components..."
 
-# 1. Activate Virtual Environment and Start FastAPI Backend
+# 1. Start FastAPI Backend using conda py_lts environment
 echo "Starting Backend API (Port 8000)..."
-source .venv/bin/activate
-uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload &
+conda run -n py_lts uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload &
 API_PID=$!
 
 # 2. Wait a moment for API to bind

@@ -7,7 +7,6 @@ Resume: skips existing. Budget-aware: respects max_generations.
 """
 
 import json
-import random
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 
@@ -31,6 +30,34 @@ class SceneGen:
         self.resolution = resolution
         self.art_style = art_style
         self.tracker = tracker
+
+    @staticmethod
+    def _extract_inline_image_bytes(response: Any) -> bytes | None:
+        candidates = getattr(response, "candidates", None) or []
+        if not candidates:
+            return None
+        content = getattr(candidates[0], "content", None)
+        parts = getattr(content, "parts", None) or []
+        for part in parts:
+            inline = getattr(part, "inline_data", None)
+            data = getattr(inline, "data", None) if inline else None
+            if data:
+                return data
+        return None
+
+    @staticmethod
+    def _is_valid_generated_image(path: Path) -> bool:
+        try:
+            if not path.exists() or path.stat().st_size < 1024:
+                return False
+            with Image.open(path) as img:
+                rgb = img.convert("RGB")
+                extrema = rgb.getextrema()
+                if all((mx - mn) < 8 for mn, mx in extrema):
+                    return False
+            return True
+        except Exception:
+            return False
 
     def run(
         self,
@@ -70,11 +97,14 @@ class SceneGen:
             panel_key = f"panel_{i:02d}"
             scene_path = scenes_dir / f"{panel_key}.png"
 
-            # Resume
+            # Resume only for valid existing files.
             if scene_path.exists():
-                print(f"Found existing {panel_key}, skipping.")
-                manifest[panel_key] = str(scene_path)
-                continue
+                if self._is_valid_generated_image(scene_path):
+                    print(f"Found existing {panel_key}, skipping.")
+                    manifest[panel_key] = str(scene_path)
+                    continue
+                print(f"Found invalid {panel_key}, regenerating.")
+                scene_path.unlink(missing_ok=True)
 
             scene_desc = panel.get("scene_description", "A dramatic manga scene")
             chars_present = panel.get("characters_present", [])
@@ -98,50 +128,53 @@ class SceneGen:
 
             print(f"Generating ({gen_count + 1}/{self.max_generations}): {panel_key} ({camera}, {mood})")
 
-            try:
-                model = get_model(self.image_model_name)
+            model = get_model(self.image_model_name)
+            generated_ok = False
+            max_attempts = 3
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    # Find best character anchor (first present character with an image)
+                    anchor_bytes = None
+                    for cname in chars_present:
+                        char_img_path = char_manifest.get(cname)
+                        if char_img_path and Path(char_img_path).exists():
+                            with open(char_img_path, "rb") as f:
+                                anchor_bytes = f.read()
+                            break
 
-                # Find best character anchor (first present character with an image)
-                anchor_bytes = None
-                for cname in chars_present:
-                    char_img_path = char_manifest.get(cname)
-                    if char_img_path and Path(char_img_path).exists():
-                        with open(char_img_path, "rb") as f:
-                            anchor_bytes = f.read()
-                        break
+                    if anchor_bytes:
+                        response = tracked_generate(
+                            self.tracker,
+                            model,
+                            [
+                                {"mime_type": "image/png", "data": anchor_bytes},
+                                f"Generate a scene featuring the character(s) from the attached reference. "
+                                f"Character consistency is CRITICAL. {prompt}",
+                            ],
+                            purpose="scene_gen",
+                        )
+                    else:
+                        response = tracked_generate(self.tracker, model, prompt, purpose="scene_gen")
 
-                if anchor_bytes:
-                    response = tracked_generate(
-                        self.tracker, model,
-                        [
-                            {"mime_type": "image/png", "data": anchor_bytes},
-                            f"Generate a scene featuring the character(s) from the attached reference. "
-                            f"Character consistency is CRITICAL. {prompt}",
-                        ],
-                        purpose="scene_gen",
-                    )
-                else:
-                    response = tracked_generate(self.tracker, model, prompt, purpose="scene_gen")
+                    image_data = self._extract_inline_image_bytes(response)
+                    if not image_data:
+                        raise ValueError("No image in response")
 
-                image_data = None
-                for part in response.candidates[0].content.parts:
-                    if part.inline_data:
-                        image_data = part.inline_data.data
-                        break
-
-                if image_data:
                     scene_path.write_bytes(image_data)
                     self._force_resize(scene_path)
+                    if not self._is_valid_generated_image(scene_path):
+                        raise ValueError("Generated image failed validation")
+
                     print(f"  ✓ Generated: {scene_path.name}")
                     gen_count += 1
-                else:
-                    raise ValueError("No image in response")
+                    generated_ok = True
+                    break
+                except Exception as e:
+                    print(f"  ✗ Attempt {attempt}/{max_attempts} failed for {panel_key}: {e}")
+                    scene_path.unlink(missing_ok=True)
 
-            except Exception as e:
-                print(f"  ✗ Failed {panel_key}: {e}. Placeholder.")
-                color = (random.randint(30, 100), random.randint(30, 100), random.randint(30, 100))
-                Image.new("RGB", self.resolution, color=color).save(scene_path)
-                gen_count += 1
+            if not generated_ok:
+                raise RuntimeError(f"Scene generation failed for '{panel_key}' after {max_attempts} attempts")
 
             manifest[panel_key] = str(scene_path)
 

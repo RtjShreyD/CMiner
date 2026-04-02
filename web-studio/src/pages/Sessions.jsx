@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import axios from 'axios';
-import { Folder, FileText, Image as ImageIcon, Video, Download } from 'lucide-react';
+import { Folder, FileText, Image as ImageIcon, Video, Download, RefreshCcw } from 'lucide-react';
 import SessionTreeView from '../components/SessionTreeView';
 import FilePreviewPane from '../components/FilePreviewPane';
 
@@ -10,6 +10,7 @@ const MEDIA_BASE = 'http://localhost:8000/media';
 export default function Sessions() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [error, setError] = useState('');
+  const [treeRefreshToken, setTreeRefreshToken] = useState(0);
 
   const loadChildren = async (path = '') => {
     try {
@@ -42,8 +43,17 @@ export default function Sessions() {
       
       {/* LEFT PANE - TREE */}
       <div className="glass-panel" style={{ width: '320px', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '1rem', borderBottom: '1px solid var(--border-color)' }}>
-          <h3 style={{ margin: 0, fontSize: '1rem' }}>Explorer</h3>
+        <div style={{ padding: '1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+          <h3 style={{ margin: 0, fontSize: '1rem' }}>Session Files</h3>
+          <button
+            className="btn"
+            type="button"
+            title="Refresh session files"
+            onClick={() => setTreeRefreshToken((prev) => prev + 1)}
+            style={{ padding: '0.2rem 0.35rem' }}
+          >
+            <RefreshCcw size={14} />
+          </button>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem' }}>
@@ -53,6 +63,7 @@ export default function Sessions() {
             loadChildren={loadChildren}
             onItemSelect={handleSelect}
             selectedPath={selectedFile?.path || ''}
+            refreshToken={treeRefreshToken}
           />
         </div>
       </div>

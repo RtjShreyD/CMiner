@@ -18,7 +18,7 @@ def main():
     parser.add_argument("--prompt", help="Override base prompt (otherwise reads prompt.txt)")
     parser.add_argument(
         "--step",
-        choices=["all", "planner", "chars", "scenes", "audio", "clouds", "video"],
+        choices=["all", "planner", "chars", "scenes", "audio", "clouds", "music", "video"],
         default="all",
         help="Execute a specific pipeline step",
     )
@@ -45,6 +45,20 @@ def main():
     parser.add_argument("--subtitle_style", help="Subtitle style id from buildpack")
     parser.add_argument("--narration_mode", help="Narration mode from buildpack")
     parser.add_argument("--subtitle_scale", type=float, help="Subtitle scale from buildpack")
+    parser.add_argument("--planner_model", help="Override planner model name")
+    parser.add_argument("--character_image_model", help="Override character image model name")
+    parser.add_argument("--scene_image_model", help="Override scene image model name")
+    parser.add_argument(
+        "--music_provider",
+        choices=["strudel", "lyria"],
+        default="strudel",
+        help="Music generation provider for Step 6",
+    )
+    parser.add_argument(
+        "--lyria_model",
+        default="lyria-3-clip-preview",
+        help="Lyria model id when --music_provider=lyria",
+    )
     parser.add_argument(
         "--episode_mode",
         choices=["true", "false"],
@@ -97,6 +111,12 @@ def main():
         max_panels = args.max_panels_per_episode
     if args.max_episode_duration_mins:
         max_duration = args.max_episode_duration_mins
+    if args.planner_model:
+        planner_model = args.planner_model
+    if args.character_image_model:
+        char_image_model = args.character_image_model
+    if args.scene_image_model:
+        scene_image_model = args.scene_image_model
     tts_voices_pool = config.get("tts_voices_pool", {})
 
     # Style/theme presets
@@ -143,12 +163,20 @@ def main():
     state = _load_state(state_path)
 
     state.setdefault("settings", {}).update({
+        "prompt": base_prompt,
+        "episodes_mode": args.episodes,
+        "episode": args.episode,
         "theme": args.theme,
         "preset": args.preset,
         "format": args.format,
+        "planner_model": planner_model,
+        "character_image_model": char_image_model,
+        "scene_image_model": scene_image_model,
         "resolution": list(resolution),
         "fps": fps,
         "enable_music": enable_music,
+        "music_provider": args.music_provider,
+        "lyria_model": args.lyria_model,
         "vector_upscale": vector_upscale,
         "max_image_requests": max_image_requests,
         "max_chars_per_episode": max_chars,
@@ -188,6 +216,7 @@ def main():
             art_style=art_style,
             theme=resolved_theme,
             episode_mode=(args.episode_mode == "true"),
+            target_episode=args.episode,
             tracker=tracker,
         )
         manga_board = planner.run(base_prompt, session_dir)
@@ -298,7 +327,26 @@ def main():
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["clouds_generated"] = True
         _save_state(state_path, state)
 
-    # ── 6. Movie Maker ────────────────────────────────────────
+    # ── 6. Music Generation (optional) ───────────────────────
+    if args.step in ["all", "music"] or (run_generation and not run_specific_step):
+        if enable_music:
+            from agents.narrativeManga.chains.music_gen import MusicGen
+
+            music_gen = MusicGen(
+                model_name=planner_model,
+                music_provider=args.music_provider,
+                lyria_model=args.lyria_model,
+                tracker=tracker,
+            )
+            music_path = music_gen.run(manga_board, session_dir, base_prompt=base_prompt)
+            state.setdefault("episodes", {}).setdefault(str(ep_num), {})["music_generated"] = bool(music_path)
+            _save_state(state_path, state)
+        else:
+            print("Music step skipped because music is disabled (--enable_music not set).")
+            state.setdefault("episodes", {}).setdefault(str(ep_num), {})["music_generated"] = False
+            _save_state(state_path, state)
+
+    # ── 7. Movie Maker ────────────────────────────────────────
     if args.step in ["all", "video"] or (run_generation and not run_specific_step):
         from agents.narrativeManga.chains.moviemaker import MovieMaker
 

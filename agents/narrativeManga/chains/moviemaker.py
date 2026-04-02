@@ -5,11 +5,10 @@ Reads render_strategy from the manga-board for transitions.
 Composites scene images + text cloud overlays + audio per panel.
 """
 
+import json
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
-
-from agents.muicStruddler.music_agent import StrudelMusicAgent
 
 
 class MovieMaker:
@@ -134,49 +133,8 @@ class MovieMaker:
             capture_output=True,
         )
 
-        # Optional music layer via Strudel
+        # Optional music layer (expects a pre-generated track from Step 6)
         if self.enable_music:
-            music_dir = session_dir / "music"
-            music_dir.mkdir(parents=True, exist_ok=True)
-            generated_track_path = music_dir / "generated_music.mp3"
-
-            if not generated_track_path.exists():
-                try:
-                    music_agent = StrudelMusicAgent()
-                    if music_agent.enabled:
-                        print("Generating music track with Strudel...")
-                        music_agent.generate_music(
-                            generated_track_path,
-                            prompt=f"Cinematic anime background music for '{manga_board.get('episode_title', 'Narrative')}'; duration {int(manga_board.get('duration_seconds', 60))} seconds.",
-                            duration_seconds=int(manga_board.get('duration_seconds', 60)),
-                        )
-                        print(f"Generated music track: {generated_track_path}")
-                    else:
-                        print("Strudel not configured; skipping music generation.")
-                except Exception as e:
-                    print(f"Music generation failed: {e}")
-
-            if generated_track_path.exists():
-                music_path = generated_track_path
-            else:
-                music_path = None
-
-            if music_path:
-                final_with_music = session_dir / f"{final_path.stem}_with_music{final_path.suffix}"
-                subprocess.run(
-                    [
-                        "ffmpeg", "-y",
-                        "-i", str(final_path),
-                        "-stream_loop", "-1", "-i", str(music_path),
-                        "-filter_complex", "[1:a]volume=0.15[a2];[0:a][a2]amix=inputs=2:duration=first:dropout_transition=2",
-                        "-c:v", "copy", "-c:a", "aac", "-shortest",
-                        str(final_with_music),
-                    ],
-                    check=False,
-                    capture_output=True,
-                )
-                if final_with_music.exists():
-                    final_path = final_with_music
             music_dir = session_dir / "music"
             music_track = None
             if music_dir.exists() and music_dir.is_dir():
@@ -200,6 +158,8 @@ class MovieMaker:
                 )
                 if final_with_music.exists():
                     final_path = final_with_music
+            else:
+                print("Music enabled but no track found under session/music; exporting video without music.")
 
         # generate thumbnail
         thumb_path = session_dir / "thumbnail.jpg"

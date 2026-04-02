@@ -175,10 +175,9 @@ def _run_podcasting(
     session: str | None = None,
 ) -> int:
     runner_link = ROOT / "agents" / "podcasting" / "run.py"
-    venv_python = ROOT / ".venv" / "bin" / "python3"
-    
+
     cmd = [
-        str(venv_python) if venv_python.exists() else sys.executable,
+        sys.executable,
         str(runner_link),
         "--workspace",
         workspace,
@@ -216,10 +215,9 @@ def _run_narrative_manga(
     develop: bool = False,
 ) -> int:
     runner_script = ROOT / "agents" / "narrativeManga" / "run.py"
-    venv_python = ROOT / ".venv" / "bin" / "python3"
 
     cmd = [
-        str(venv_python) if venv_python.exists() else sys.executable,
+        sys.executable,
         str(runner_script),
         "--workspace",
         workspace,
@@ -249,10 +247,9 @@ def _run_char_gen(
     pack_id: str | None = None,
 ) -> int:
     runner_script = ROOT / "agents" / "charGen" / "run.py"
-    venv_python = ROOT / ".venv" / "bin" / "python3"
 
     cmd = [
-        str(venv_python) if venv_python.exists() else sys.executable,
+        sys.executable,
         str(runner_script),
         "--workspace",
         workspace,

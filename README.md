@@ -13,17 +13,18 @@ CMiner is a powerful multi-agent framework designed for high-quality automated c
   ```
 
 ### 2. Setup Environment
-Clone the repository and initialize the virtual environment:
+Clone the repository and initialize the conda environment:
 
 ```bash
-# Create virtual environment
-python3 -m venv .venv
+# Create environment (one-time)
+conda create -n py_lts python=3.11 -y
 
-# Activate environment
-source .venv/bin/activate
+# Install dependencies into py_lts
+conda run -n py_lts pip install -r requirements.txt
 
-# Install dependencies
-pip install -r requirements.txt
+# Run commands in py_lts
+conda run -n py_lts python main.py --help
+
 ```
 
 ### 3. API Configuration

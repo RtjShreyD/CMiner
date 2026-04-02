@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, SquareTerminal, Loader2, StopCircle, Lock, Unlock } from 'lucide-react';
+import { Play, SquareTerminal, Loader2, StopCircle, Lock, Unlock, RotateCcw, RefreshCcw } from 'lucide-react';
 import axios from 'axios';
 import { useNavigate, useParams } from 'react-router-dom';
 import SessionTreeView from '../components/SessionTreeView';
@@ -82,6 +82,8 @@ export default function Agents() {
   const [reuseSessionChars, setReuseSessionChars] = useState(false);
   const [selectedSessionCharacter, setSelectedSessionCharacter] = useState('');
   const [enableMusic, setEnableMusic] = useState(false);
+  const [musicProvider, setMusicProvider] = useState('strudel');
+  const [lyriaModel, setLyriaModel] = useState('lyria-3-clip-preview');
   const [maxImageRequests, setMaxImageRequests] = useState(50);
   const [maxCharsPerEpisode, setMaxCharsPerEpisode] = useState(5);
   const [maxPanelsPerEpisode, setMaxPanelsPerEpisode] = useState(50);
@@ -113,12 +115,19 @@ export default function Agents() {
   const [buildpackSaveMessage, setBuildpackSaveMessage] = useState('');
   const [workflowHashes, setWorkflowHashes] = useState({});
   const [stepBusy, setStepBusy] = useState('');
-  const [stepReset, setStepReset] = useState({ planner: false, chars: false, scenes: false, audio: false, texts: false, video: false });
+  const [stepReset, setStepReset] = useState({ planner: false, chars: false, scenes: false, audio: false, texts: false, music: false, video: false });
   const [episodesMode, setEpisodesMode] = useState('new');
   const [episodeMode, setEpisodeMode] = useState(true);
   const [targetEpisode, setTargetEpisode] = useState('');
   const [sourceCharSession, setSourceCharSession] = useState('');
   const [sourceCharPath, setSourceCharPath] = useState('');
+  const [availableModelsByTask, setAvailableModelsByTask] = useState({ planner: [], chars: [], scenes: [] });
+  const [plannerModel, setPlannerModel] = useState('models/gemini-flash-latest');
+  const [charsModel, setCharsModel] = useState('models/gemini-2.5-flash-image');
+  const [scenesModel, setScenesModel] = useState('models/gemini-2.5-flash-image');
+  const [charPromptItems, setCharPromptItems] = useState([]);
+  const [charRedoBusy, setCharRedoBusy] = useState('');
+  const [toasts, setToasts] = useState([]);
   const [sectionLocks, setSectionLocks] = useState({
     step0: false,
     planner: false,
@@ -126,12 +135,21 @@ export default function Agents() {
     scenes: false,
     audio: false,
     texts: false,
+    music: false,
     video: false,
   });
 
   const ws = useRef(null);
   const scrollRef = useRef(null);
   const buildpackRequestSeq = useRef(0);
+
+  const pushToast = (type, message) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setToasts((prev) => [...prev, { id, type, message }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 3200);
+  };
 
   const goToAgentWorkspace = (agent, mode, path = '') => {
     const safeMode = mode === 'existing' ? 'existing' : 'new';
@@ -182,24 +200,93 @@ export default function Agents() {
     }
   };
 
+  const buildSessionSettingsSnapshot = () => ({
+    prompt: narrativePrompt,
+    episodes_mode: episodesMode,
+    episode: targetEpisode ? parseInt(targetEpisode, 10) : null,
+    theme: null,
+    preset,
+    format,
+    planner_model: plannerModel,
+    character_image_model: charsModel,
+    scene_image_model: scenesModel,
+    char_visual_overrides: charPromptItems.reduce((acc, item) => {
+      if (item?.name && typeof item.visual_prompt === 'string') {
+        acc[item.name] = item.visual_prompt;
+      }
+      return acc;
+    }, {}),
+    resolution: null,
+    fps: null,
+    enable_music: enableMusic,
+    music_provider: musicProvider,
+    lyria_model: lyriaModel,
+    vector_upscale: false,
+    max_image_requests: maxImageRequests,
+    max_chars_per_episode: maxCharsPerEpisode,
+    max_panels_per_episode: maxPanelsPerEpisode,
+    max_episode_duration_mins: maxEpisodeDurationMins,
+    cloud_style: buildpackCloudStyle,
+    font_style: buildpackFontStyle,
+    subtitle_style: buildpackSubtitleStyle,
+    narration_mode: buildpackCloudStyle === 'cloud-none' ? 'subtitles_only' : 'hybrid_subtitles_clouds',
+    subtitle_scale: subtitleScale,
+    episode_mode: episodeMode,
+  });
+
   const runNarrativeStep = async (step, opts = {}) => {
+    const stepToSections = {
+      planner: ['planner'],
+      chars: ['chars'],
+      scenes: ['scenes'],
+      audio: ['audio'],
+      texts: ['texts'],
+      music: ['music'],
+      video: ['video'],
+      all: ['step0', 'planner', 'chars', 'scenes', 'audio', 'texts', 'music', 'video'],
+    };
+    const sectionsToLock = stepToSections[step] || [];
+    if (sectionsToLock.length > 0) {
+      setSectionLocks((prev) => {
+        const next = { ...prev };
+        sectionsToLock.forEach((k) => {
+          next[k] = true;
+        });
+        return next;
+      });
+    }
+
     setStepBusy(step);
     setBuildpackSaveMessage('');
     try {
       const isExisting = sessionMode === 'existing' || Boolean(sessionPath);
+      if (isExisting && sessionPath) {
+        try {
+          await axios.post(`${API_BASE}/agents/narrative/session-sync`, {
+            session_path: sessionPath,
+            settings: buildSessionSettingsSnapshot(),
+            locks: sectionLocks,
+          });
+        } catch {
+          // Continue run even if settings sync fails; payload still carries current values.
+        }
+      }
       const effectiveEpisodesMode = isExisting ? episodesMode : 'new';
       const effectiveEpisodeMode = isExisting ? episodeMode : true;
       const payload = {
         session_mode: isExisting ? 'existing' : 'new',
         session_path: isExisting ? sessionPath : null,
         step,
-        reset: Boolean(stepReset[step]),
+        reset: opts?.redo ? true : Boolean(stepReset[step]),
+        redo: Boolean(opts?.redo),
         prompt: narrativePrompt,
         episodes: effectiveEpisodesMode,
         episode: targetEpisode ? parseInt(targetEpisode, 10) : null,
         preset,
         format,
         enable_music: enableMusic,
+        music_provider: musicProvider,
+        lyria_model: lyriaModel,
         narration_mode: buildpackCloudStyle === 'cloud-none' ? 'subtitles_only' : 'hybrid_subtitles_clouds',
         buildpack_resolution: buildpackResolution,
         cloud_style: buildpackCloudStyle,
@@ -207,26 +294,75 @@ export default function Agents() {
         subtitle_style: buildpackSubtitleStyle,
         subtitle_scale: subtitleScale,
         episode_mode: effectiveEpisodeMode,
+        planner_model: plannerModel,
+        chars_model: charsModel,
+        scenes_model: scenesModel,
+        chars_visual_overrides: charPromptItems.reduce((acc, item) => {
+          if (item?.name && typeof item.visual_prompt === 'string') {
+            acc[item.name] = item.visual_prompt;
+          }
+          return acc;
+        }, {}),
         max_image_requests: maxImageRequests,
         max_chars_per_episode: maxCharsPerEpisode,
         max_panels_per_episode: maxPanelsPerEpisode,
         max_episode_duration_mins: maxEpisodeDurationMins,
       };
 
-      const res = await axios.post(`${API_BASE}/agents/narrative/run-step`, payload);
-      const nextPath = res.data?.session_path || sessionPath;
+      const start = await axios.post(`${API_BASE}/agents/narrative/run-step-live`, payload);
+
+      if (start.data?.done && start.data?.result) {
+        const instant = start.data.result;
+        const instantStatus = instant?.status || 'success';
+        setLogs((prev) => [...prev, { type: instantStatus === 'error' ? 'error' : 'info', msg: instant?.reason || `Step '${step}' ${instantStatus}.` }]);
+        if (instantStatus === 'error') {
+          pushToast('error', `Step ${step} failed.`);
+        } else {
+          pushToast('success', `Step ${step} ${instantStatus}.`);
+        }
+        return;
+      }
+
+      const currentJobId = start.data?.job_id;
+      if (!currentJobId) {
+        setLogs((prev) => [...prev, { type: 'error', msg: `Step '${step}' did not return a job id.` }]);
+        return;
+      }
+
+      setJobId(currentJobId);
+      setLogs((prev) => [...prev, { type: 'info', msg: `Step '${step}' started.` }]);
+
+      let finalRes = null;
+      for (;;) {
+        // Poll final structured result while websocket streams console lines.
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const statusRes = await axios.get(`${API_BASE}/agents/narrative/job/${currentJobId}`);
+        if (statusRes.data?.done) {
+          finalRes = statusRes.data?.result || {};
+          break;
+        }
+      }
+
+      setJobId(null);
+
+      const nextPath = finalRes?.session_path || sessionPath;
       if (nextPath && nextPath !== sessionPath) {
         setSessionPath(nextPath);
       }
-      if (res.data?.hashes) {
-        setWorkflowHashes(res.data.hashes);
+      if (finalRes?.hashes) {
+        setWorkflowHashes(finalRes.hashes);
       } else if (nextPath) {
         await refreshWorkflowHashes(nextPath);
       }
 
-      const status = res.data?.status || 'success';
-      const note = status === 'error' ? (res.data?.stderr || 'Step failed') : `Step '${step}' completed`;
+      const status = finalRes?.status || 'success';
+      const note = status === 'error' ? (finalRes?.stderr || 'Step failed') : `Step '${step}' completed`;
       setLogs((prev) => [...prev, { type: status === 'error' ? 'error' : 'success', msg: note }]);
+      pushToast(status === 'error' ? 'error' : 'success', status === 'error' ? `Step ${step} failed.` : `Step ${step} completed.`);
+
+      if (status !== 'error' && step === 'chars') {
+        setTreeRefreshToken((prev) => prev + 1);
+      }
 
       if (nextPath) {
         const sid = nextPath.split('/')[0];
@@ -237,7 +373,9 @@ export default function Agents() {
       }
     } catch (e) {
       setLogs((prev) => [...prev, { type: 'error', msg: `Step '${step}' failed: ${e.message}` }]);
+      pushToast('error', `Step ${step} failed.`);
     } finally {
+      setJobId(null);
       setStepBusy('');
     }
   };
@@ -260,6 +398,64 @@ export default function Agents() {
       }
     } catch (e) {
       setBuildpackSaveMessage(`Character copy failed: ${e.message}`);
+    }
+  };
+
+  const redoSingleCharacter = async (item) => {
+    if (!item?.name || !sessionPath) return;
+    setCharRedoBusy(item.name);
+    setBuildpackSaveMessage('');
+    setLogs((prev) => [...prev, { type: 'info', msg: `Single-char redo started: ${item.name}` }]);
+    try {
+      try {
+        await axios.post(`${API_BASE}/agents/narrative/session-sync`, {
+          session_path: sessionPath,
+          settings: buildSessionSettingsSnapshot(),
+          locks: sectionLocks,
+        });
+      } catch {
+        // Continue even if state sync fails.
+      }
+
+      const res = await axios.post(`${API_BASE}/agents/narrative/redo-char`, {
+        session_path: sessionPath,
+        char_name: item.name,
+        visual_prompt: item.visual_prompt,
+        chars_model: charsModel,
+      });
+
+      const stdout = String(res.data?.stdout || '');
+      const stderr = String(res.data?.stderr || '');
+      if (stdout.trim()) {
+        const lines = stdout.split('\n').map((l) => l.trimEnd()).filter(Boolean).map((msg) => ({ type: 'log', msg }));
+        setLogs((prev) => [...prev, ...lines]);
+      }
+      if (stderr.trim()) {
+        const lines = stderr.split('\n').map((l) => l.trimEnd()).filter(Boolean).map((msg) => ({ type: 'error', msg }));
+        setLogs((prev) => [...prev, ...lines]);
+      }
+
+      if (res.data?.ok === false) {
+        setLogs((prev) => [...prev, { type: 'error', msg: `Single-char redo failed: ${res.data?.error || 'unknown error'}` }]);
+        pushToast('error', `Failed to regenerate ${item.name}.`);
+        setBuildpackSaveMessage(`Regenerate failed for ${item.name}: ${res.data?.error || 'unknown error'}`);
+        return;
+      }
+
+      if (res.data?.hashes) {
+        setWorkflowHashes(res.data.hashes);
+      } else {
+        await refreshWorkflowHashes(sessionPath);
+      }
+      setTreeRefreshToken((prev) => prev + 1);
+      setLogs((prev) => [...prev, { type: 'success', msg: `Single-char redo completed: ${item.name}` }]);
+      pushToast('success', `Regenerated ${item.name}.`);
+      setBuildpackSaveMessage(`Regenerated ${item.name}`);
+    } catch (e) {
+      pushToast('error', `Failed to regenerate ${item.name}.`);
+      setBuildpackSaveMessage(`Regenerate failed for ${item.name}: ${e.message}`);
+    } finally {
+      setCharRedoBusy('');
     }
   };
 
@@ -359,9 +555,66 @@ export default function Agents() {
       refreshWorkflowHashes(sessionPath);
     } else {
       setWorkflowHashes({});
-      setSectionLocks({ step0: false, planner: false, chars: false, scenes: false, audio: false, texts: false, video: false });
+      setSectionLocks({ step0: false, planner: false, chars: false, scenes: false, audio: false, texts: false, music: false, video: false });
     }
   }, [sessionPath]);
+
+  useEffect(() => {
+    const loadSavedPrompt = async () => {
+      if (sessionMode !== 'existing' || !sessionPath) return;
+      try {
+        const filePath = `${sessionPath}/session_state.json`;
+        const res = await axios.get(`${API_BASE}/sessions/file`, { params: { path: filePath } });
+        const raw = res.data?.content || '{}';
+        const parsed = JSON.parse(raw);
+        const settings = parsed?.settings || {};
+        const savedPrompt = settings?.prompt;
+        if (typeof savedPrompt === 'string' && savedPrompt.trim()) {
+          setNarrativePrompt(savedPrompt);
+        }
+
+        if (typeof settings?.preset === 'string' && settings.preset.trim()) setPreset(settings.preset);
+        if (typeof settings?.planner_model === 'string' && settings.planner_model.trim()) setPlannerModel(settings.planner_model);
+        if (typeof settings?.character_image_model === 'string' && settings.character_image_model.trim()) setCharsModel(settings.character_image_model);
+        if (typeof settings?.scene_image_model === 'string' && settings.scene_image_model.trim()) setScenesModel(settings.scene_image_model);
+        if (typeof settings?.max_image_requests === 'number') setMaxImageRequests(settings.max_image_requests);
+        if (typeof settings?.max_chars_per_episode === 'number') setMaxCharsPerEpisode(settings.max_chars_per_episode);
+        if (typeof settings?.max_panels_per_episode === 'number') setMaxPanelsPerEpisode(settings.max_panels_per_episode);
+        if (typeof settings?.max_episode_duration_mins === 'number') setMaxEpisodeDurationMins(settings.max_episode_duration_mins);
+        if (typeof settings?.enable_music === 'boolean') setEnableMusic(settings.enable_music);
+        if (typeof settings?.music_provider === 'string' && settings.music_provider.trim()) setMusicProvider(settings.music_provider);
+        if (typeof settings?.lyria_model === 'string' && settings.lyria_model.trim()) setLyriaModel(settings.lyria_model);
+        if (typeof settings?.cloud_style === 'string' && settings.cloud_style.trim()) setBuildpackCloudStyle(settings.cloud_style);
+        if (typeof settings?.font_style === 'string' && settings.font_style.trim()) setBuildpackFontStyle(settings.font_style);
+        if (typeof settings?.subtitle_style === 'string' && settings.subtitle_style.trim()) setBuildpackSubtitleStyle(settings.subtitle_style);
+        if (typeof settings?.subtitle_scale === 'number') setSubtitleScale(settings.subtitle_scale);
+        if (typeof settings?.episodes_mode === 'string' && settings.episodes_mode.trim()) setEpisodesMode(settings.episodes_mode);
+        if (typeof settings?.episode_mode === 'boolean') setEpisodeMode(settings.episode_mode);
+        if (typeof settings?.episode === 'number') setTargetEpisode(String(settings.episode));
+      } catch {
+        // Keep current prompt when there is no stored session prompt.
+      }
+    };
+    loadSavedPrompt();
+  }, [sessionMode, sessionPath]);
+
+  useEffect(() => {
+    const loadPlannerCharPrompts = async () => {
+      if (page !== 'workspace' || !sessionPath) {
+        setCharPromptItems([]);
+        return;
+      }
+      try {
+        const res = await axios.get(`${API_BASE}/agents/narrative/char-prompts`, { params: { session_path: sessionPath } });
+        const rows = Array.isArray(res.data?.char_prompts) ? res.data.char_prompts : [];
+        setCharPromptItems(rows.map((r) => ({ name: r.name, visual_prompt: r.visual_prompt || '' })));
+      } catch {
+        setCharPromptItems([]);
+      }
+    };
+
+    loadPlannerCharPrompts();
+  }, [page, sessionPath, workflowHashes.planner]);
 
   useEffect(() => {
     if (sessionMode !== 'existing') {
@@ -390,10 +643,12 @@ export default function Agents() {
     setSectionLocks(next);
     if (!sessionPath) return;
     try {
-      await axios.post(`${API_BASE}/agents/narrative/locks`, {
+      await axios.post(`${API_BASE}/agents/narrative/session-sync`, {
         session_path: sessionPath,
+        settings: buildSessionSettingsSnapshot(),
         locks: next,
       });
+      setTreeRefreshToken((prev) => prev + 1);
     } catch {
       // Keep local lock state even if persistence fails.
     }
@@ -507,6 +762,29 @@ export default function Agents() {
 
     if (page === 'workspace') {
       loadBuildpackOptions();
+    }
+  }, [page]);
+
+  useEffect(() => {
+    const loadGoogleModels = async () => {
+      try {
+        const res = await axios.get(`${API_BASE}/agents/narrative/google-models`);
+        const byTask = res.data?.by_task || {};
+        const defaults = res.data?.defaults || {};
+        setAvailableModelsByTask({
+          planner: Array.isArray(byTask?.planner) ? byTask.planner : [],
+          chars: Array.isArray(byTask?.chars) ? byTask.chars : [],
+          scenes: Array.isArray(byTask?.scenes) ? byTask.scenes : [],
+        });
+        if (defaults?.planner_model) setPlannerModel(defaults.planner_model);
+        if (defaults?.character_image_model) setCharsModel(defaults.character_image_model);
+        if (defaults?.scene_image_model) setScenesModel(defaults.scene_image_model);
+      } catch {
+        setAvailableModelsByTask({ planner: [], chars: [], scenes: [] });
+      }
+    };
+    if (page === 'workspace') {
+      loadGoogleModels();
     }
   }, [page]);
 
@@ -666,7 +944,27 @@ export default function Agents() {
   }
 
   return (
-    <div style={{ display: 'flex', gap: '1rem', height: '100%' }}>
+    <div style={{ display: 'flex', gap: '1rem', height: '100%', position: 'relative' }}>
+      <div style={{ position: 'fixed', top: 18, right: 22, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            style={{
+              minWidth: 220,
+              maxWidth: 360,
+              padding: '0.55rem 0.75rem',
+              borderRadius: 8,
+              border: '1px solid var(--border-color)',
+              background: t.type === 'error' ? '#4a1f1f' : '#1f3f2f',
+              color: '#f4f8ff',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+              fontSize: '0.86rem',
+            }}
+          >
+            {t.message}
+          </div>
+        ))}
+      </div>
       <aside className="glass-panel" style={{ width: 390, display: 'flex', flexDirection: 'column' }}>
         <section style={{ padding: '1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
@@ -867,7 +1165,7 @@ export default function Agents() {
               <div className="config-control">
                 <label>Episodes</label>
                 {sessionMode === 'existing' ? (
-                  <select value={episodesMode} onChange={(e) => setEpisodesMode(e.target.value)}>
+                  <select value={episodesMode} onChange={(e) => setEpisodesMode(e.target.value)} disabled>
                     <option value="new">new</option>
                     <option value="continue">continue</option>
                   </select>
@@ -877,47 +1175,61 @@ export default function Agents() {
               </div>
               <div className="config-control">
                 <label>Episode Number (optional)</label>
-                <input value={targetEpisode} onChange={(e) => setTargetEpisode(e.target.value)} placeholder="e.g. 2" disabled={sessionMode !== 'existing'} />
+                <input value={targetEpisode} onChange={(e) => setTargetEpisode(e.target.value)} placeholder="e.g. 2" disabled />
               </div>
             </div>
             <div className="config-control" style={{ marginTop: '0.65rem' }}>
               <label>
-                <input type="checkbox" checked={sessionMode === 'existing' ? episodeMode : true} onChange={(e) => setEpisodeMode(e.target.checked)} disabled={sessionMode !== 'existing'} />
+                <input type="checkbox" checked={sessionMode === 'existing' ? episodeMode : true} onChange={(e) => setEpisodeMode(e.target.checked)} disabled />
                 <span style={{ marginLeft: 6 }}>
                   Episode Mode (on = continue series, off = single-video mode)
-                  {sessionMode !== 'existing' ? ' - locked for new sessions' : ''}
+                  {sessionMode === 'existing' ? ' - locked for existing sessions' : ' - locked for new sessions'}
                 </span>
               </label>
             </div>
             <div className="config-grid" style={{ marginTop: '0.65rem' }}>
               <div className="config-control">
                 <label>Art Style</label>
-                <select value={preset} onChange={(e) => setPreset(e.target.value)}>
+                <select value={preset} onChange={(e) => setPreset(e.target.value)} disabled={sessionMode === 'existing'}>
                   <option value="cinematic_anime">Cinematic Anime</option>
                   <option value="noir_comic">Noir Comic</option>
                   <option value="sci_fi_neon">Sci-Fi Neon</option>
                   <option value="horror_manga">Horror Manga</option>
+                  <option value="magic_illusion_stage">Magic Illusion Stage</option>
+                  <option value="comedy_cartoon">Comedy Cartoon</option>
+                  <option value="ghibli_watercolor">Ghibli Watercolor</option>
+                  <option value="retro_pop_comic">Retro Pop Comic</option>
+                  <option value="space_opera_cinematic">Space Opera Cinematic</option>
+                </select>
+              </div>
+              <div className="config-control">
+                <label>Planner Model</label>
+                <select value={plannerModel} onChange={(e) => setPlannerModel(e.target.value)} disabled={sessionMode === 'existing'}>
+                  {availableModelsByTask.planner.length === 0 && <option value={plannerModel}>{plannerModel}</option>}
+                  {availableModelsByTask.planner.map((m) => (
+                    <option key={m.name} value={m.name}>{m.name}</option>
+                  ))}
                 </select>
               </div>
             </div>
             <div className="config-grid" style={{ marginTop: '0.65rem' }}>
               <div className="config-control">
                 <label>Max Images</label>
-                <input type="number" min="1" value={maxImageRequests} onChange={(e) => setMaxImageRequests(parseInt(e.target.value, 10) || 1)} />
+                <input type="number" min="1" value={maxImageRequests} onChange={(e) => setMaxImageRequests(parseInt(e.target.value, 10) || 1)} disabled={sessionMode === 'existing'} />
               </div>
               <div className="config-control">
                 <label>Max Characters</label>
-                <input type="number" min="1" value={maxCharsPerEpisode} onChange={(e) => setMaxCharsPerEpisode(parseInt(e.target.value, 10) || 1)} />
+                <input type="number" min="1" value={maxCharsPerEpisode} onChange={(e) => setMaxCharsPerEpisode(parseInt(e.target.value, 10) || 1)} disabled={sessionMode === 'existing'} />
               </div>
             </div>
             <div className="config-grid" style={{ marginTop: '0.65rem' }}>
               <div className="config-control">
                 <label>Max Panels</label>
-                <input type="number" min="1" value={maxPanelsPerEpisode} onChange={(e) => setMaxPanelsPerEpisode(parseInt(e.target.value, 10) || 1)} />
+                <input type="number" min="1" value={maxPanelsPerEpisode} onChange={(e) => setMaxPanelsPerEpisode(parseInt(e.target.value, 10) || 1)} disabled={sessionMode === 'existing'} />
               </div>
               <div className="config-control">
                 <label>Max Duration (min)</label>
-                <input type="number" min="1" value={maxEpisodeDurationMins} onChange={(e) => setMaxEpisodeDurationMins(parseInt(e.target.value, 10) || 1)} />
+                <input type="number" min="1" value={maxEpisodeDurationMins} onChange={(e) => setMaxEpisodeDurationMins(parseInt(e.target.value, 10) || 1)} disabled={sessionMode === 'existing'} />
               </div>
             </div>
             <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -925,6 +1237,7 @@ export default function Agents() {
                 <input type="checkbox" checked={stepReset.planner} onChange={(e) => setStepReset((s) => ({ ...s, planner: e.target.checked }))} /> reset
               </label>
               <button className="btn" type="button" onClick={() => runNarrativeStep('planner')} disabled={stepBusy === 'planner'}>{stepBusy === 'planner' ? 'Running...' : 'Run Planner'}</button>
+              <button className="btn" type="button" title="Redo Planner" onClick={() => runNarrativeStep('planner', { redo: true })} disabled={stepBusy === 'planner' || stepBusy === 'all'}><RotateCcw size={14} /></button>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.planner || 'n/a'}</span>
             </div>
             </fieldset>
@@ -940,6 +1253,52 @@ export default function Agents() {
               </button>
             </summary>
             <fieldset disabled={sectionLocks.chars} style={{ border: 'none', padding: 0, margin: 0 }}>
+            <div className="config-control" style={{ marginBottom: '0.6rem' }}>
+              <label>Chars Model</label>
+              <select value={charsModel} onChange={(e) => setCharsModel(e.target.value)}>
+                {availableModelsByTask.chars.length === 0 && <option value={charsModel}>{charsModel}</option>}
+                {availableModelsByTask.chars.map((m) => (
+                  <option key={m.name} value={m.name}>{m.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="config-control" style={{ marginBottom: '0.6rem' }}>
+              <label>Planner Character Prompts</label>
+              {charPromptItems.length === 0 ? (
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                  Run Planner first to populate character prompts.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                  {charPromptItems.map((item, idx) => (
+                    <div key={`${item.name}-${idx}`}>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginBottom: '0.2rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.35rem' }}>
+                        <span>{item.name}</span>
+                        <button
+                          className="btn"
+                          type="button"
+                          title={`Redo ${item.name}`}
+                          onClick={() => redoSingleCharacter(item)}
+                          disabled={charRedoBusy === item.name || stepBusy === 'chars' || stepBusy === 'all' || !sessionPath}
+                          style={{ padding: '0.15rem 0.3rem' }}
+                        >
+                          {charRedoBusy === item.name ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                        </button>
+                      </div>
+                      <textarea
+                        rows={6}
+                        value={item.visual_prompt}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setCharPromptItems((prev) => prev.map((p, pidx) => (pidx === idx ? { ...p, visual_prompt: value } : p)));
+                        }}
+                        style={{ width: '100%', resize: 'vertical', minHeight: 150 }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             {sessionMode === 'existing' ? (
               <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                 Character source is controlled by files from selected session.
@@ -984,6 +1343,7 @@ export default function Agents() {
                 <input type="checkbox" checked={stepReset.chars} onChange={(e) => setStepReset((s) => ({ ...s, chars: e.target.checked }))} /> reset
               </label>
               <button className="btn" type="button" onClick={() => runNarrativeStep('chars')} disabled={stepBusy === 'chars'}>{stepBusy === 'chars' ? 'Running...' : 'Run Chars'}</button>
+              <button className="btn" type="button" title="Redo Chars" onClick={() => runNarrativeStep('chars', { redo: true })} disabled={stepBusy === 'chars' || stepBusy === 'all'}><RotateCcw size={14} /></button>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.chars || 'n/a'}</span>
             </div>
             </fieldset>
@@ -999,11 +1359,21 @@ export default function Agents() {
               </button>
             </summary>
             <fieldset disabled={sectionLocks.scenes} style={{ border: 'none', padding: 0, margin: 0 }}>
+            <div className="config-control" style={{ marginTop: '0.5rem' }}>
+              <label>Scenes Model</label>
+              <select value={scenesModel} onChange={(e) => setScenesModel(e.target.value)}>
+                {availableModelsByTask.scenes.length === 0 && <option value={scenesModel}>{scenesModel}</option>}
+                {availableModelsByTask.scenes.map((m) => (
+                  <option key={m.name} value={m.name}>{m.name}</option>
+                ))}
+              </select>
+            </div>
             <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <input type="checkbox" checked={stepReset.scenes} onChange={(e) => setStepReset((s) => ({ ...s, scenes: e.target.checked }))} /> reset
               </label>
               <button className="btn" type="button" onClick={() => runNarrativeStep('scenes')} disabled={stepBusy === 'scenes'}>{stepBusy === 'scenes' ? 'Running...' : 'Run Scenes'}</button>
+              <button className="btn" type="button" title="Redo Scenes" onClick={() => runNarrativeStep('scenes', { redo: true })} disabled={stepBusy === 'scenes' || stepBusy === 'all'}><RotateCcw size={14} /></button>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.scenes || 'n/a'}</span>
             </div>
             </fieldset>
@@ -1024,6 +1394,7 @@ export default function Agents() {
                 <input type="checkbox" checked={stepReset.audio} onChange={(e) => setStepReset((s) => ({ ...s, audio: e.target.checked }))} /> reset
               </label>
               <button className="btn" type="button" onClick={() => runNarrativeStep('audio')} disabled={stepBusy === 'audio'}>{stepBusy === 'audio' ? 'Running...' : 'Run Audio'}</button>
+              <button className="btn" type="button" title="Redo Audio" onClick={() => runNarrativeStep('audio', { redo: true })} disabled={stepBusy === 'audio' || stepBusy === 'all'}><RotateCcw size={14} /></button>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.audio || 'n/a'}</span>
             </div>
             </fieldset>
@@ -1046,11 +1417,44 @@ export default function Agents() {
                 <option value="clouds">Clouds</option>
               </select>
             </div>
+            <div className="config-grid" style={{ marginTop: '0.65rem' }}>
+              <div className="config-control">
+                <label>Font Style</label>
+                <select value={buildpackFontStyle} onChange={(e) => setBuildpackFontStyle(e.target.value)}>
+                  {(buildpackOptions?.fontstyles || []).map((opt) => (
+                    <option key={opt.id} value={opt.id}>{opt.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="config-control">
+                <label>Subtitle Style</label>
+                <select value={buildpackSubtitleStyle} onChange={(e) => setBuildpackSubtitleStyle(e.target.value)}>
+                  {(buildpackOptions?.subtitle_styles || []).map((opt) => (
+                    <option key={opt.id} value={opt.id}>{opt.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="config-grid" style={{ marginTop: '0.65rem' }}>
+              <div className="config-control">
+                <label>Cloud Style</label>
+                <select value={buildpackCloudStyle} onChange={(e) => setBuildpackCloudStyle(e.target.value)}>
+                  {(buildpackOptions?.cloud_styles || []).map((opt) => (
+                    <option key={opt.id} value={opt.id}>{opt.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="config-control">
+                <label>Subtitle Scale</label>
+                <input type="range" min="0.5" max="2.2" step="0.05" value={subtitleScale} onChange={(e) => setSubtitleScale(parseFloat(e.target.value))} />
+              </div>
+            </div>
             <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <input type="checkbox" checked={stepReset.texts} onChange={(e) => setStepReset((s) => ({ ...s, texts: e.target.checked }))} /> reset
               </label>
               <button className="btn" type="button" onClick={() => runNarrativeStep('texts')} disabled={stepBusy === 'texts'}>{stepBusy === 'texts' ? 'Running...' : 'Run Texts'}</button>
+              <button className="btn" type="button" title="Redo Texts" onClick={() => runNarrativeStep('texts', { redo: true })} disabled={stepBusy === 'texts' || stepBusy === 'all'}><RotateCcw size={14} /></button>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.texts || 'n/a'}</span>
             </div>
             </fieldset>
@@ -1060,7 +1464,50 @@ export default function Agents() {
 
           <details open style={{ marginBottom: '0.8rem' }}>
             <summary style={{ cursor: 'pointer', color: 'var(--text-accent)', marginBottom: '0.55rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span>Step 6 - Video</span>
+              <span>Step 6 - Music</span>
+              <button className="btn" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSectionLock('music'); }} style={{ padding: '0.2rem 0.35rem' }}>
+                {sectionLocks.music ? <Lock size={14} /> : <Unlock size={14} />}
+              </button>
+            </summary>
+            <fieldset disabled={sectionLocks.music} style={{ border: 'none', padding: 0, margin: 0 }}>
+            <div className="config-control" style={{ marginTop: '0.5rem' }}>
+              <label>
+                <input type="checkbox" checked={enableMusic} onChange={(e) => setEnableMusic(e.target.checked)} />
+                <span style={{ marginLeft: 6 }}>Enable Music Generation</span>
+              </label>
+            </div>
+            <div className="config-control" style={{ marginTop: '0.5rem' }}>
+              <label>Music Provider</label>
+              <select value={musicProvider} onChange={(e) => setMusicProvider(e.target.value)}>
+                <option value="strudel">Strudel</option>
+                <option value="lyria">Lyria</option>
+              </select>
+            </div>
+            {musicProvider === 'lyria' && (
+              <div className="config-control" style={{ marginTop: '0.5rem' }}>
+                <label>Lyria Model</label>
+                <select value={lyriaModel} onChange={(e) => setLyriaModel(e.target.value)}>
+                  <option value="lyria-3-clip-preview">lyria-3-clip-preview</option>
+                  <option value="lyria-3-pro-preview">lyria-3-pro-preview</option>
+                </select>
+              </div>
+            )}
+            <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="checkbox" checked={stepReset.music} onChange={(e) => setStepReset((s) => ({ ...s, music: e.target.checked }))} /> reset
+              </label>
+              <button className="btn" type="button" onClick={() => runNarrativeStep('music')} disabled={stepBusy === 'music'}>{stepBusy === 'music' ? 'Running...' : 'Run Music'}</button>
+              <button className="btn" type="button" title="Redo Music" onClick={() => runNarrativeStep('music', { redo: true })} disabled={stepBusy === 'music' || stepBusy === 'all'}><RotateCcw size={14} /></button>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.music || 'n/a'}</span>
+            </div>
+            </fieldset>
+          </details>
+
+          <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '0.35rem 0 0.9rem' }} />
+
+          <details open style={{ marginBottom: '0.8rem' }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--text-accent)', marginBottom: '0.55rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>Step 7 - Video</span>
               <button className="btn" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSectionLock('video'); }} style={{ padding: '0.2rem 0.35rem' }}>
                 {sectionLocks.video ? <Lock size={14} /> : <Unlock size={14} />}
               </button>
@@ -1075,17 +1522,12 @@ export default function Agents() {
                 <option value="youtube_widescreen">YouTube Widescreen</option>
               </select>
             </div>
-            <div className="config-control" style={{ marginTop: '0.5rem' }}>
-              <label>
-                <input type="checkbox" checked={enableMusic} onChange={(e) => setEnableMusic(e.target.checked)} />
-                <span style={{ marginLeft: 6 }}>Enable Music</span>
-              </label>
-            </div>
             <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <input type="checkbox" checked={stepReset.video} onChange={(e) => setStepReset((s) => ({ ...s, video: e.target.checked }))} /> reset
               </label>
               <button className="btn" type="button" onClick={() => runNarrativeStep('video')} disabled={stepBusy === 'video'}>{stepBusy === 'video' ? 'Running...' : 'Run Video'}</button>
+              <button className="btn" type="button" title="Redo Video" onClick={() => runNarrativeStep('video', { redo: true })} disabled={stepBusy === 'video' || stepBusy === 'all'}><RotateCcw size={14} /></button>
               <button className="btn" type="button" onClick={() => runNarrativeStep('all')} disabled={stepBusy === 'all'}>{stepBusy === 'all' ? 'Running...' : 'Run End-to-End'}</button>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.video || 'n/a'}</span>
             </div>
@@ -1341,7 +1783,18 @@ export default function Agents() {
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ flex: 1, display: 'flex', minHeight: 0, gap: '1rem' }}>
           <div className="glass-panel" style={{ width: '23%', minWidth: 260, padding: '0.75rem', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <h3 style={{ margin: '0 0 0.75rem 0', fontSize: '1rem' }}>Session Files</h3>
+            <div style={{ margin: '0 0 0.75rem 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1rem' }}>Session Files</h3>
+              <button
+                className="btn"
+                type="button"
+                title="Refresh session files"
+                onClick={() => setTreeRefreshToken((prev) => prev + 1)}
+                style={{ padding: '0.2rem 0.35rem' }}
+              >
+                <RefreshCcw size={14} />
+              </button>
+            </div>
 
             {sessionMode === 'new' ? (
               <div style={{ color: 'var(--text-muted)', padding: '0.75rem' }}>
