@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from api.routers import sessions, agents, styles, characters
+from api.routers import sessions, agents, styles, characters, overlay_samples
 from api.models import create_db_and_tables
 from api.services.registry_store import ensure_library_dirs, ensure_subdirs, seed_default_styles
 
@@ -58,6 +58,7 @@ app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
 app.include_router(styles.router, prefix="/api/styles", tags=["styles"])
 app.include_router(characters.router, prefix="/api/characters", tags=["characters"])
+app.include_router(overlay_samples.router, prefix="/api/overlay-samples", tags=["overlay-samples"])
 
 @app.get("/api/health")
 async def health_check():

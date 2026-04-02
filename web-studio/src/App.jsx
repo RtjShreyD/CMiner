@@ -1,11 +1,9 @@
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
-import { LayoutDashboard, FolderTree, PlaySquare, Settings, TerminalSquare, Palette, Users } from 'lucide-react';
+import { LayoutDashboard, FolderTree, PlaySquare, Settings, TerminalSquare } from 'lucide-react';
 import './index.css';
 
 import Sessions from './pages/Sessions';
 import Agents from './pages/Agents';
-import Styles from './pages/Styles';
-import Characters from './pages/Characters';
 
 // Placeholder Pages
 const Dashboard = () => (
@@ -51,12 +49,6 @@ const Layout = ({ children }) => {
           <NavLink to="/editor" className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
             <PlaySquare size={20} /> A/V Editor
           </NavLink>
-          <NavLink to="/styles" className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
-            <Palette size={20} /> Styles
-          </NavLink>
-          <NavLink to="/characters" className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}>
-            <Users size={20} /> Characters
-          </NavLink>
         </nav>
         <div style={{ padding: '1rem', borderTop: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
           <Settings size={16} style={{display:'inline', marginRight:'8px', verticalAlign:'middle'}}/> Config
@@ -91,8 +83,6 @@ function App() {
           <Route path="/agents/:agentId/:sessionMode" element={<Agents />} />
           <Route path="/agents/:agentId/:sessionMode/:sessionId" element={<Agents />} />
           <Route path="/editor" element={<Editor />} />
-          <Route path="/styles" element={<Styles />} />
-          <Route path="/characters" element={<Characters />} />
           <Route path="*" element={<div>404 Not Found</div>} />
         </Routes>
       </Layout>

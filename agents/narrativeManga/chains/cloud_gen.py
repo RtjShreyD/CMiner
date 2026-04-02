@@ -9,19 +9,33 @@ Produces: overlays/panel_XX/frame_XXXX.png (transparent PNGs)
 """
 
 import json
-import os
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+from api.services.buildpacks import _draw_cloud, _load_font, _resolve_cloud_kind, _resolve_subtitle_style
 
 
 class CloudGen:
-    def __init__(self, fps: int = 24, resolution: Tuple[int, int] = (1280, 720)):
+    def __init__(
+        self,
+        fps: int = 24,
+        resolution: Tuple[int, int] = (1280, 720),
+        cloud_style: str = "cloud-none",
+        font_style: str = "font-geist-sans",
+        subtitle_style: str = "sub-clean-bottom",
+        narration_mode: str = "hybrid_subtitles_clouds",
+        subtitle_scale: float = 1.0,
+    ):
         self.fps = fps
         self.resolution = resolution
+        self.cloud_style = cloud_style
+        self.font_style = font_style
+        self.subtitle_style = subtitle_style
+        self.narration_mode = narration_mode
+        self.subtitle_scale = subtitle_scale
 
     def run(self, manga_board: Dict[str, Any], session_dir: Path):
         print("--- Pipeline: Cloud Generation (OpenCV) ---")
@@ -33,8 +47,10 @@ class CloudGen:
         panels = manga_board.get("panels", [])
         characters = manga_board.get("characters", [])
 
-        # Load font
-        font = self._load_font(26)
+        font_size = max(20, int(34 * max(0.5, self.subtitle_scale)))
+        font = _load_font(self.font_style, font_size)
+        sub_style = _resolve_subtitle_style(self.subtitle_style)
+        cloud_kind = _resolve_cloud_kind(self.cloud_style)
 
         for i, panel in enumerate(panels):
             panel_key = f"panel_{i:02d}"
@@ -101,13 +117,11 @@ class CloudGen:
                 img = Image.new("RGBA", self.resolution, (0, 0, 0, 0))
                 draw = ImageDraw.Draw(img)
 
-                # Draw speech bubble for each active character
-                # Only show the CURRENTLY speaking character's bubble
+                # Show currently speaking text with the same styles used by buildpack preview.
                 if active_char and active_char in char_words:
                     words = char_words[active_char][-15:]  # last 15 chunks
                     text = " ".join(words)
-                    pos = char_positions.get(active_char, (100, 50))
-                    self._draw_bubble(draw, text, pos, font)
+                    self._draw_overlay_text(draw, text, char_positions.get(active_char, (100, 50)), font, sub_style, cloud_kind)
 
                 frame_path = panel_overlay_dir / f"frame_{frame_idx:04d}.png"
                 img.save(frame_path)
@@ -175,14 +189,16 @@ class CloudGen:
 
         return positions
 
-    def _draw_bubble(
+    def _draw_overlay_text(
         self,
         draw: ImageDraw.ImageDraw,
         text: str,
         position: Tuple[int, int],
         font: ImageFont.FreeTypeFont,
+        subtitle_style: Dict[str, Any],
+        cloud_kind: str,
     ):
-        """Draw a speech bubble with wrapped text at the given position."""
+        """Draw cloud and subtitle text using shared buildpack styles."""
         pad = 20
         max_text_w = 380
         lines = self._wrap_text(text, font, draw, max_text_w)
@@ -226,28 +242,36 @@ class CloudGen:
         bx2 = bx1 + bw
         by2 = by1 + bh
 
-        # Draw rounded rectangle
-        try:
-            draw.rounded_rectangle(
-                [bx1, by1, bx2, by2],
-                radius=18,
-                fill=(255, 255, 255, 240),
-                outline=(0, 0, 0, 255),
-                width=3,
-            )
-        except AttributeError:
-            draw.rectangle(
-                [bx1, by1, bx2, by2],
-                fill=(255, 255, 255, 240),
-                outline=(0, 0, 0, 255),
-                width=3,
-            )
+        if self.narration_mode != "subtitles_only" and cloud_kind != "none":
+            _draw_cloud(draw, cloud_kind, (bx1, by1, bx2, by2))
+            cy = by1 + pad
+            for j, line in enumerate(lines):
+                draw.text((bx1 + pad, cy), line, font=font, fill=(12, 18, 34, 255))
+                cy += line_heights[j] + 4
 
-        # Draw text
-        cy = by1 + pad
-        for j, line in enumerate(lines):
-            draw.text((bx1 + pad, cy), line, font=font, fill=(0, 0, 0, 255))
-            cy += line_heights[j] + 4
+        band_h = max(80, int(self.resolution[1] * 0.11))
+        if subtitle_style.get("position") == "top":
+            band = (0, 0, self.resolution[0], band_h)
+            text_y = 14
+        else:
+            band = (0, self.resolution[1] - band_h, self.resolution[0], self.resolution[1])
+            text_y = self.resolution[1] - band_h + 14
+        draw.rectangle(band, fill=tuple(subtitle_style.get("band_fill", [0, 0, 0, 140])))
+
+        summary = " ".join(lines)
+        try:
+            text_w = draw.textbbox((0, 0), summary, font=font)[2]
+        except AttributeError:
+            text_w = draw.textsize(summary, font=font)[0]
+        text_x = max((self.resolution[0] - text_w) // 2, 24)
+        draw.text(
+            (text_x, text_y),
+            summary,
+            font=font,
+            fill=tuple(subtitle_style.get("fill", [245, 245, 245])),
+            stroke_width=int(subtitle_style.get("stroke_width", 2)),
+            stroke_fill=tuple(subtitle_style.get("stroke", [0, 0, 0])),
+        )
 
     def _wrap_text(self, text, font, draw, max_width):
         words = text.split()
@@ -273,10 +297,4 @@ class CloudGen:
         return lines
 
     def _load_font(self, size: int):
-        font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-        try:
-            if os.path.exists(font_path):
-                return ImageFont.truetype(font_path, size)
-        except Exception:
-            pass
-        return ImageFont.load_default()
+        return _load_font(self.font_style, size)

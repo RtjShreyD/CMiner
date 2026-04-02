@@ -38,6 +38,19 @@ def main():
     parser.add_argument("--max_chars_per_episode", type=int, help="Maximum characters in one episode")
     parser.add_argument("--max_panels_per_episode", type=int, help="Maximum panel count in one episode")
     parser.add_argument("--max_episode_duration_mins", type=int, help="Maximum episode duration minutes")
+    parser.add_argument("--resolution_w", type=int, help="Override output resolution width")
+    parser.add_argument("--resolution_h", type=int, help="Override output resolution height")
+    parser.add_argument("--cloud_style", help="Cloud style id from buildpack")
+    parser.add_argument("--font_style", help="Font style id from buildpack")
+    parser.add_argument("--subtitle_style", help="Subtitle style id from buildpack")
+    parser.add_argument("--narration_mode", help="Narration mode from buildpack")
+    parser.add_argument("--subtitle_scale", type=float, help="Subtitle scale from buildpack")
+    parser.add_argument(
+        "--episode_mode",
+        choices=["true", "false"],
+        default="true",
+        help="true allows multi-episode continuity, false forces single-video mode",
+    )
     parser.add_argument(
         "--develop",
         action="store_true",
@@ -90,6 +103,7 @@ def main():
     themes = config.get("themes", {})
     art_styles = config.get("art_styles", {})
     output_presets = config.get("output_presets", {})
+    resolved_theme = themes.get(args.theme, args.theme) if args.theme else None
 
     base_prompt = args.prompt or ""
     if args.theme and args.theme in themes and not base_prompt:
@@ -110,6 +124,8 @@ def main():
         resolution = tuple(preset_cfg.get("resolution", list(resolution)))
         fps = preset_cfg.get("fps", fps)
         target_duration = preset_cfg.get("duration_mins", target_duration)
+    if args.resolution_w and args.resolution_h:
+        resolution = (args.resolution_w, args.resolution_h)
 
     enable_music = args.enable_music
     vector_upscale = args.vector_upscale
@@ -138,6 +154,12 @@ def main():
         "max_chars_per_episode": max_chars,
         "max_panels_per_episode": max_panels,
         "max_episode_duration_mins": max_duration,
+        "cloud_style": args.cloud_style or "cloud-none",
+        "font_style": args.font_style or "font-geist-sans",
+        "subtitle_style": args.subtitle_style or "sub-clean-bottom",
+        "narration_mode": args.narration_mode or "hybrid_subtitles_clouds",
+        "subtitle_scale": args.subtitle_scale if args.subtitle_scale is not None else 1.0,
+        "episode_mode": args.episode_mode == "true",
     })
     _save_state(state_path, state)
 
@@ -164,7 +186,8 @@ def main():
             max_chars=max_chars,
             max_panels=max_panels,
             art_style=art_style,
-            theme=args.theme,
+            theme=resolved_theme,
+            episode_mode=(args.episode_mode == "true"),
             tracker=tracker,
         )
         manga_board = planner.run(base_prompt, session_dir)
@@ -261,7 +284,16 @@ def main():
     if args.step in ["all", "clouds"] or (run_generation and not run_specific_step):
         from agents.narrativeManga.chains.cloud_gen import CloudGen
 
-        cloud_gen = CloudGen(fps=fps, resolution=resolution)
+        settings = state.get("settings", {})
+        cloud_gen = CloudGen(
+            fps=fps,
+            resolution=resolution,
+            cloud_style=settings.get("cloud_style", "cloud-none"),
+            font_style=settings.get("font_style", "font-geist-sans"),
+            subtitle_style=settings.get("subtitle_style", "sub-clean-bottom"),
+            narration_mode=settings.get("narration_mode", "hybrid_subtitles_clouds"),
+            subtitle_scale=float(settings.get("subtitle_scale", 1.0) or 1.0),
+        )
         cloud_gen.run(manga_board, session_dir)
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["clouds_generated"] = True
         _save_state(state_path, state)

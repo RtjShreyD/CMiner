@@ -23,6 +23,7 @@ class EpisodePlanner:
         max_panels: int = 15,
         art_style: str = "cinematic anime",
         theme: str = None,
+        episode_mode: bool = True,
         tracker: Optional[LLMTracker] = None,
     ):
         self.model_name = model_name
@@ -32,6 +33,7 @@ class EpisodePlanner:
         self.max_panels = max_panels
         self.art_style = art_style
         self.theme = theme
+        self.episode_mode = episode_mode
         self.tracker = tracker
 
     def run(self, base_prompt: str, session_dir: Path) -> Dict[str, Any]:
@@ -44,13 +46,13 @@ class EpisodePlanner:
             [d for d in episodes_dir.iterdir() if d.is_dir() and d.name.startswith("episode")],
             key=lambda p: p.name,
         )
-        next_num = len(existing) + 1
+        next_num = len(existing) + 1 if self.episode_mode else 1
         is_first = next_num == 1
 
         # Gather prior episode context for continuity
         prior_context = ""
         established_chars = []
-        if existing:
+        if existing and self.episode_mode:
             last_ep_dir = existing[-1]
             last_board = last_ep_dir / "manga-board.json"
             if last_board.exists():

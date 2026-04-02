@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Play, SquareTerminal, Loader2, StopCircle } from 'lucide-react';
+import { Play, SquareTerminal, Loader2, StopCircle, Lock, Unlock } from 'lucide-react';
 import axios from 'axios';
 import { useNavigate, useParams } from 'react-router-dom';
 import SessionTreeView from '../components/SessionTreeView';
@@ -10,10 +10,11 @@ const WS_BASE = 'ws://localhost:8000/api';
 const MEDIA_BASE = 'http://localhost:8000/media';
 const LIBRARY_MEDIA_BASE = 'http://localhost:8000/library-media';
 const AGENTS_LIST = [
-  { id: 'narrativeManga', name: 'Narrative Manga', desc: 'Generates animated manga episodes with TTS and Chronos.' },
-  { id: 'newsDesk', name: 'AI News Anchor', desc: 'Synthesizes daily news into a video broadcast.' },
-  { id: 'brandAds', name: 'Brand Storyteller', desc: 'Creates short 15s commercial reels.' },
+  { id: 'autoAnimator', name: 'AutoAnimator', desc: 'Focused preview-driven animator powered by Narrative Manga backend.' },
 ];
+const EXECUTION_AGENT_BY_UI_AGENT = {
+  autoAnimator: 'narrativeManga',
+};
 const VALID_AGENT_IDS = new Set(AGENTS_LIST.map((a) => a.id));
 
 function stylePreviewBackground(cloudStyle) {
@@ -62,7 +63,7 @@ export default function Agents() {
   const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState([]);
   const [jobId, setJobId] = useState(null);
-  const [selectedAgent, setSelectedAgent] = useState('narrativeManga');
+  const [selectedAgent, setSelectedAgent] = useState('autoAnimator');
   const [sessionMode, setSessionMode] = useState('new');
   const [sessionPath, setSessionPath] = useState('');
   const [availableSessions, setAvailableSessions] = useState([]);
@@ -71,7 +72,6 @@ export default function Agents() {
   const [sessionChars, setSessionChars] = useState([]);
 
   const [narrativePrompt, setNarrativePrompt] = useState('A sci-fi detective embarks on a neon city mystery.');
-  const [theme, setTheme] = useState('scary_stories');
   const [preset, setPreset] = useState('cinematic_anime');
   const [format, setFormat] = useState('tiktok');
   const [cloudStyle, setCloudStyle] = useState('cloud-fluffy-default');
@@ -90,9 +90,48 @@ export default function Agents() {
 
   const [selectedFile, setSelectedFile] = useState(null);
   const [configPreview, setConfigPreview] = useState(null);
+  const [buildpackOptions, setBuildpackOptions] = useState(null);
+  const [buildpackResolution, setBuildpackResolution] = useState('youtube_video');
+  const [buildpackCharacterId, setBuildpackCharacterId] = useState('');
+  const [buildpackSceneId, setBuildpackSceneId] = useState('');
+  const [buildpackFontStyle, setBuildpackFontStyle] = useState('font-ubuntu-mono');
+  const [buildpackSubtitleStyle, setBuildpackSubtitleStyle] = useState('sub-neon-pop');
+  const [buildpackCloudStyle, setBuildpackCloudStyle] = useState('cloud-none');
+  const [buildpackSampleText, setBuildpackSampleText] = useState('The city whispered: move now.');
+  const [buildpackSampleSize, setBuildpackSampleSize] = useState(48);
+  const [buildpackPreviewBlobUrl, setBuildpackPreviewBlobUrl] = useState('');
+  const [buildpackPreviewLoading, setBuildpackPreviewLoading] = useState(false);
+  const [buildpackPreviewError, setBuildpackPreviewError] = useState('');
+  const [subtitleX, setSubtitleX] = useState(0.03958333333333333);
+  const [subtitleY, setSubtitleY] = useState(0.8787037037037037);
+  const [subtitleScale, setSubtitleScale] = useState(1.25);
+  const [cloudX, setCloudX] = useState(0.3796875);
+  const [cloudY, setCloudY] = useState(0.17962962962962964);
+  const [cloudW, setCloudW] = useState(0.55);
+  const [cloudH, setCloudH] = useState(0.17962962962962964);
+  const [savingLayout, setSavingLayout] = useState(false);
+  const [buildpackSaveMessage, setBuildpackSaveMessage] = useState('');
+  const [workflowHashes, setWorkflowHashes] = useState({});
+  const [stepBusy, setStepBusy] = useState('');
+  const [stepReset, setStepReset] = useState({ planner: false, chars: false, scenes: false, audio: false, texts: false, video: false });
+  const [episodesMode, setEpisodesMode] = useState('new');
+  const [episodeMode, setEpisodeMode] = useState(true);
+  const [targetEpisode, setTargetEpisode] = useState('');
+  const [sourceCharSession, setSourceCharSession] = useState('');
+  const [sourceCharPath, setSourceCharPath] = useState('');
+  const [sectionLocks, setSectionLocks] = useState({
+    step0: false,
+    planner: false,
+    chars: false,
+    scenes: false,
+    audio: false,
+    texts: false,
+    video: false,
+  });
 
   const ws = useRef(null);
   const scrollRef = useRef(null);
+  const buildpackRequestSeq = useRef(0);
 
   const goToAgentWorkspace = (agent, mode, path = '') => {
     const safeMode = mode === 'existing' ? 'existing' : 'new';
@@ -108,39 +147,15 @@ export default function Agents() {
 
   const startAgent = async (agentName) => {
     try {
-      if (sessionMode === 'existing' && !sessionPath) {
-        setLogs([{ type: 'error', msg: 'Please select an existing session before running.' }]);
-        return;
-      }
-
       setRunning(true);
-      setLogs([{ type: 'system', msg: `Triggering ${agentName}...` }]);
-      const res = await axios.post(`${API_BASE}/agents/run`, {
-        agent_name: agentName,
-        prompt: narrativePrompt,
-        theme,
-        preset,
-        format,
-        cloud_style: cloudStyle,
-        font_style: fontStyle,
-        narration_mode: narrationMode,
-        character_pack_id: characterPackId || null,
-        reuse_session_chars: reuseSessionChars,
-        session_chars_path: reuseSessionChars ? `${sessionPath}/chars` : null,
-        selected_session_character: reuseSessionChars ? selectedSessionCharacter || null : null,
-        session_mode: sessionMode,
-        session_path: sessionMode === 'existing' ? sessionPath : null,
-        enable_music: enableMusic,
-        max_image_requests: maxImageRequests,
-        max_chars_per_episode: maxCharsPerEpisode,
-        max_panels_per_episode: maxPanelsPerEpisode,
-        max_episode_duration_mins: maxEpisodeDurationMins,
-      });
-      setJobId(res.data.job_id);
+      setLogs((prev) => [...prev, { type: 'system', msg: `Running full pipeline via ${agentName}...` }]);
+      await runNarrativeStep('all');
     } catch (err) {
       setLogs((prev) => [...prev, { type: 'error', msg: `Failed to start: ${err.message}` }]);
       setRunning(false);
+      return;
     }
+    setRunning(false);
   };
 
   const handleTreeItemClick = (item) => {
@@ -150,6 +165,136 @@ export default function Agents() {
     }
     setSelectedFile(item);
     setConfigPreview(null);
+  };
+
+  const nudge = (value, delta, min = 0, max = 0.95) => Math.max(min, Math.min(max, Number((value + delta).toFixed(4))));
+
+  const refreshWorkflowHashes = async (path) => {
+    if (!path) {
+      setWorkflowHashes({});
+      return;
+    }
+    try {
+      const res = await axios.get(`${API_BASE}/agents/narrative/checkpoints`, { params: { session_path: path } });
+      setWorkflowHashes(res.data?.hashes || {});
+    } catch {
+      setWorkflowHashes({});
+    }
+  };
+
+  const runNarrativeStep = async (step, opts = {}) => {
+    setStepBusy(step);
+    setBuildpackSaveMessage('');
+    try {
+      const isExisting = sessionMode === 'existing' || Boolean(sessionPath);
+      const effectiveEpisodesMode = isExisting ? episodesMode : 'new';
+      const effectiveEpisodeMode = isExisting ? episodeMode : true;
+      const payload = {
+        session_mode: isExisting ? 'existing' : 'new',
+        session_path: isExisting ? sessionPath : null,
+        step,
+        reset: Boolean(stepReset[step]),
+        prompt: narrativePrompt,
+        episodes: effectiveEpisodesMode,
+        episode: targetEpisode ? parseInt(targetEpisode, 10) : null,
+        preset,
+        format,
+        enable_music: enableMusic,
+        narration_mode: buildpackCloudStyle === 'cloud-none' ? 'subtitles_only' : 'hybrid_subtitles_clouds',
+        buildpack_resolution: buildpackResolution,
+        cloud_style: buildpackCloudStyle,
+        font_style: buildpackFontStyle,
+        subtitle_style: buildpackSubtitleStyle,
+        subtitle_scale: subtitleScale,
+        episode_mode: effectiveEpisodeMode,
+        max_image_requests: maxImageRequests,
+        max_chars_per_episode: maxCharsPerEpisode,
+        max_panels_per_episode: maxPanelsPerEpisode,
+        max_episode_duration_mins: maxEpisodeDurationMins,
+      };
+
+      const res = await axios.post(`${API_BASE}/agents/narrative/run-step`, payload);
+      const nextPath = res.data?.session_path || sessionPath;
+      if (nextPath && nextPath !== sessionPath) {
+        setSessionPath(nextPath);
+      }
+      if (res.data?.hashes) {
+        setWorkflowHashes(res.data.hashes);
+      } else if (nextPath) {
+        await refreshWorkflowHashes(nextPath);
+      }
+
+      const status = res.data?.status || 'success';
+      const note = status === 'error' ? (res.data?.stderr || 'Step failed') : `Step '${step}' completed`;
+      setLogs((prev) => [...prev, { type: status === 'error' ? 'error' : 'success', msg: note }]);
+
+      if (nextPath) {
+        const sid = nextPath.split('/')[0];
+        goToAgentWorkspace(selectedAgent, 'existing', nextPath);
+        if (sid) {
+          navigate(`/agents/${encodeURIComponent(selectedAgent)}/existing/${encodeURIComponent(sid)}`, { replace: true });
+        }
+      }
+    } catch (e) {
+      setLogs((prev) => [...prev, { type: 'error', msg: `Step '${step}' failed: ${e.message}` }]);
+    } finally {
+      setStepBusy('');
+    }
+  };
+
+  const copyCharacterToSession = async () => {
+    if (!sourceCharPath) return;
+    try {
+      const target = sessionPath || null;
+      const res = await axios.post(`${API_BASE}/agents/narrative/copy-character`, {
+        source_path: sourceCharPath,
+        target_session_path: target,
+      });
+      const nextPath = res.data?.target_session_path || sessionPath;
+      if (nextPath && nextPath !== sessionPath) {
+        setSessionPath(nextPath);
+      }
+      setBuildpackSaveMessage(`Character copied: ${res.data?.copied_to || ''}`);
+      if (nextPath) {
+        await refreshWorkflowHashes(nextPath);
+      }
+    } catch (e) {
+      setBuildpackSaveMessage(`Character copy failed: ${e.message}`);
+    }
+  };
+
+  const saveBuildpackToSession = async () => {
+    setSavingLayout(true);
+    setBuildpackSaveMessage('');
+    try {
+      const res = await axios.post(`${API_BASE}/overlay-samples/save`, {
+        session_mode: sessionMode,
+        session_path: sessionPath || null,
+        resolution: buildpackResolution,
+        character_id: buildpackCharacterId || null,
+        scene_id: buildpackSceneId || null,
+        fontstyle: buildpackFontStyle,
+        subtitle_style: buildpackSubtitleStyle,
+        cloud_style: buildpackCloudStyle,
+        sample_text: buildpackSampleText,
+        sample_size: Number(buildpackSampleSize) || 48,
+        subtitle_x: subtitleX,
+        subtitle_y: subtitleY,
+        subtitle_scale: subtitleScale,
+        cloud_x: cloudX,
+        cloud_y: cloudY,
+        cloud_w: cloudW,
+        cloud_h: cloudH,
+      });
+
+      const saved = res.data?.saved_path;
+      const sid = res.data?.session_id;
+      setBuildpackSaveMessage(saved ? `Saved to session ${sid}: ${saved}` : 'Saved.');
+    } catch (e) {
+      setBuildpackSaveMessage(`Save failed: ${e.message}`);
+    } finally {
+      setSavingLayout(false);
+    }
   };
 
   useEffect(() => {
@@ -194,11 +339,12 @@ export default function Agents() {
     }
 
     const normalizedMode = modeParam === 'existing' ? 'existing' : 'new';
+    const runtimeAgent = EXECUTION_AGENT_BY_UI_AGENT[agentId] || agentId;
     setPage('workspace');
     setSelectedAgent(agentId);
     setSessionMode(normalizedMode);
     if (normalizedMode === 'existing' && sessionId) {
-      setSessionPath(`${sessionId}/${agentId}`);
+      setSessionPath(`${sessionId}/${runtimeAgent}`);
     } else {
       setSessionPath('');
     }
@@ -207,6 +353,51 @@ export default function Agents() {
   useEffect(() => {
     setSelectedFile(null);
   }, [sessionMode, sessionPath]);
+
+  useEffect(() => {
+    if (sessionPath) {
+      refreshWorkflowHashes(sessionPath);
+    } else {
+      setWorkflowHashes({});
+      setSectionLocks({ step0: false, planner: false, chars: false, scenes: false, audio: false, texts: false, video: false });
+    }
+  }, [sessionPath]);
+
+  useEffect(() => {
+    if (sessionMode !== 'existing') {
+      setEpisodesMode('new');
+      setEpisodeMode(true);
+      setTargetEpisode('');
+    }
+  }, [sessionMode]);
+
+  useEffect(() => {
+    const loadLocks = async () => {
+      if (!sessionPath) return;
+      try {
+        const res = await axios.get(`${API_BASE}/agents/narrative/locks`, { params: { session_path: sessionPath } });
+        const incoming = res.data?.locks || {};
+        setSectionLocks((prev) => ({ ...prev, ...incoming }));
+      } catch {
+        setSectionLocks((prev) => ({ ...prev }));
+      }
+    };
+    loadLocks();
+  }, [sessionPath]);
+
+  const toggleSectionLock = async (sectionKey) => {
+    const next = { ...sectionLocks, [sectionKey]: !sectionLocks[sectionKey] };
+    setSectionLocks(next);
+    if (!sessionPath) return;
+    try {
+      await axios.post(`${API_BASE}/agents/narrative/locks`, {
+        session_path: sessionPath,
+        locks: next,
+      });
+    } catch {
+      // Keep local lock state even if persistence fails.
+    }
+  };
 
   useEffect(() => {
     if (!running || page !== 'workspace' || sessionMode !== 'existing' || !sessionPath) {
@@ -230,16 +421,10 @@ export default function Agents() {
         for (const r of roots) {
           try {
             const sub = await axios.get(`${API_BASE}/sessions/tree`, { params: { path: r.path } });
-            const match = sub.data.find((item) => item.is_dir && item.name === selectedAgent);
+            const runtimeAgent = EXECUTION_AGENT_BY_UI_AGENT[selectedAgent] || selectedAgent;
+            const match = sub.data.find((item) => item.is_dir && item.name === runtimeAgent);
             if (match) {
-              try {
-                const charsRes = await axios.get(`${API_BASE}/characters/session-images`, { params: { session_path: match.path } });
-                if ((charsRes.data || []).length > 0) {
-                  sessionOptions.push(match.path);
-                }
-              } catch {
-                // ignore sessions without usable character previews
-              }
+              sessionOptions.push(match.path);
             }
           } catch {
             // ignore missing session folders
@@ -248,7 +433,8 @@ export default function Agents() {
 
         setAvailableSessions(sessionOptions);
         if (sessionMode === 'existing') {
-          const urlDerivedPath = sessionId ? `${sessionId}/${selectedAgent}` : '';
+          const runtimeAgent = EXECUTION_AGENT_BY_UI_AGENT[selectedAgent] || selectedAgent;
+          const urlDerivedPath = sessionId ? `${sessionId}/${runtimeAgent}` : '';
           const nextPath = sessionOptions.includes(urlDerivedPath)
             ? urlDerivedPath
             : (sessionOptions[0] || '');
@@ -296,6 +482,114 @@ export default function Agents() {
   }, [page]);
 
   useEffect(() => {
+    const loadBuildpackOptions = async () => {
+      try {
+        const res = await axios.get(`${API_BASE}/overlay-samples/buildpacks/options`);
+        const options = res.data || null;
+        setBuildpackOptions(options);
+
+        if (options?.resolutions?.length && !options.resolutions.some((r) => r.key === buildpackResolution)) {
+          setBuildpackResolution(options.resolutions[0].key);
+        }
+        if (options?.fontstyles?.length && !options.fontstyles.some((f) => f.id === buildpackFontStyle)) {
+          setBuildpackFontStyle(options.fontstyles[0].id);
+        }
+        if (options?.subtitle_styles?.length && !options.subtitle_styles.some((s) => s.id === buildpackSubtitleStyle)) {
+          setBuildpackSubtitleStyle(options.subtitle_styles[0].id);
+        }
+        if (options?.cloud_styles?.length && !options.cloud_styles.some((c) => c.id === buildpackCloudStyle)) {
+          setBuildpackCloudStyle(options.cloud_styles[0].id);
+        }
+      } catch {
+        setBuildpackOptions(null);
+      }
+    };
+
+    if (page === 'workspace') {
+      loadBuildpackOptions();
+    }
+  }, [page]);
+
+  useEffect(() => {
+    if (page !== 'workspace') return;
+    if (sessionMode !== 'new') {
+      setBuildpackPreviewBlobUrl('');
+      setBuildpackPreviewError('');
+      return;
+    }
+
+    const timerId = setTimeout(async () => {
+      const reqId = ++buildpackRequestSeq.current;
+      try {
+        setBuildpackPreviewLoading(true);
+        setBuildpackPreviewError('');
+        const res = await axios.post(`${API_BASE}/overlay-samples/`, {
+          session_mode: sessionMode,
+          session_path: sessionPath || null,
+          resolution: buildpackResolution,
+          character_id: buildpackCharacterId || null,
+          scene_id: buildpackSceneId || null,
+          fontstyle: buildpackFontStyle,
+          subtitle_style: buildpackSubtitleStyle,
+          cloud_style: buildpackCloudStyle,
+          sample_text: buildpackSampleText,
+          sample_size: Number(buildpackSampleSize) || 48,
+          subtitle_x: subtitleX,
+          subtitle_y: subtitleY,
+          subtitle_scale: subtitleScale,
+          cloud_x: cloudX,
+          cloud_y: cloudY,
+          cloud_w: cloudW,
+          cloud_h: cloudH,
+        });
+
+        if (res.data?.skipped) {
+          if (reqId !== buildpackRequestSeq.current) return;
+          setBuildpackPreviewBlobUrl('');
+          return;
+        }
+
+        if (reqId !== buildpackRequestSeq.current) return;
+        const blob = res.data?.preview_blob || '';
+        const mime = res.data?.preview_mime || 'image/png';
+        const dataUrl = blob ? `data:${mime};base64,${blob}` : '';
+        setBuildpackPreviewBlobUrl(dataUrl);
+        if (dataUrl) {
+          setSelectedFile(null);
+          setConfigPreview(null);
+        }
+      } catch (e) {
+        if (reqId !== buildpackRequestSeq.current) return;
+        setBuildpackPreviewError(`BuildPack preview failed: ${e.message}`);
+      } finally {
+        if (reqId !== buildpackRequestSeq.current) return;
+        setBuildpackPreviewLoading(false);
+      }
+    }, 320);
+
+    return () => clearTimeout(timerId);
+  }, [
+    buildpackCharacterId,
+    buildpackCloudStyle,
+    buildpackFontStyle,
+    buildpackResolution,
+    buildpackSampleSize,
+    buildpackSampleText,
+    buildpackSceneId,
+    buildpackSubtitleStyle,
+    cloudH,
+    cloudW,
+    cloudX,
+    cloudY,
+    page,
+    sessionMode,
+    sessionPath,
+    subtitleScale,
+    subtitleX,
+    subtitleY,
+  ]);
+
+  useEffect(() => {
     const loadSessionChars = async () => {
       if (sessionMode !== 'existing' || !sessionPath) {
         setSessionChars([]);
@@ -326,6 +620,20 @@ export default function Agents() {
   const selectedFontProfile = fontProfiles.find((profile) => profile.id === fontStyle) || null;
   const selectedSubtitleProfile = subtitleProfiles.find((profile) => profile.id === subtitleStyle) || null;
   const previewableCharacterPacks = characterPacks.filter((pack) => Boolean(packPreviewImage(pack)));
+  const sourceCharOptions = (buildpackOptions?.characters || []);
+  const sourceCharSessions = Array.from(new Set(sourceCharOptions.map((item) => {
+    const p = (item.path || '').split('/');
+    return p.length > 1 ? p[1] : '';
+  }).filter(Boolean)));
+  const filteredSourceChars = sourceCharSession
+    ? sourceCharOptions.filter((item) => (item.path || '').split('/')[1] === sourceCharSession)
+    : sourceCharOptions;
+
+  useEffect(() => {
+    if (!sourceCharSession && sourceCharSessions.length > 0) {
+      setSourceCharSession(sourceCharSessions[0]);
+    }
+  }, [sourceCharSession, sourceCharSessions]);
 
   useEffect(() => {
     if (!characterPackId) return;
@@ -376,7 +684,13 @@ export default function Agents() {
 
         <section style={{ padding: '1rem', overflowY: 'auto', flex: 1 }}>
           <details open style={{ marginBottom: '0.8rem' }}>
-            <summary style={{ cursor: 'pointer', color: 'var(--text-accent)', marginBottom: '0.55rem' }}>Run Setup</summary>
+            <summary style={{ cursor: 'pointer', color: 'var(--text-accent)', marginBottom: '0.55rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>Step 0 - Run Setup + BuildPack</span>
+              <button className="btn" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSectionLock('step0'); }} style={{ padding: '0.2rem 0.35rem' }}>
+                {sectionLocks.step0 ? <Lock size={14} /> : <Unlock size={14} />}
+              </button>
+            </summary>
+            <fieldset disabled={sectionLocks.step0} style={{ border: 'none', padding: 0, margin: 0 }}>
             <div className="config-grid" style={{ marginBottom: '0.8rem' }}>
               <div className="config-control">
                 <label>Session Mode</label>
@@ -415,17 +729,370 @@ export default function Agents() {
               )}
             </div>
 
-            <div className="config-control" style={{ marginBottom: '0.8rem' }}>
-              <label>Narrative Prompt</label>
-              <textarea
-                rows={3}
-                value={narrativePrompt}
-                onChange={(e) => setNarrativePrompt(e.target.value)}
-                style={{ width: '100%', resize: 'vertical' }}
-              />
-            </div>
+            {sessionMode === 'existing' ? (
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                BuildPack preview is available only for New Session mode. Existing sessions continue using direct file preview flow.
+              </div>
+            ) : (
+              <>
+                <div className="config-grid">
+                  <div className="config-control">
+                    <label>Resolution</label>
+                    <select value={buildpackResolution} onChange={(e) => setBuildpackResolution(e.target.value)}>
+                      {(buildpackOptions?.resolutions || []).map((res) => (
+                        <option key={res.key} value={res.key}>{res.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="config-grid" style={{ marginTop: '0.75rem' }}>
+                  <div className="config-control">
+                    <label>Scene</label>
+                    <select value={buildpackSceneId} onChange={(e) => setBuildpackSceneId(e.target.value)}>
+                      <option value="">Auto Background</option>
+                      {(buildpackOptions?.scenes || []).map((opt) => (
+                        <option key={opt.id} value={opt.id}>{opt.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="config-control">
+                    <label>Font Style</label>
+                    <select value={buildpackFontStyle} onChange={(e) => setBuildpackFontStyle(e.target.value)}>
+                      {(buildpackOptions?.fontstyles || []).map((opt) => (
+                        <option key={opt.id} value={opt.id}>{opt.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="config-grid" style={{ marginTop: '0.75rem' }}>
+                  <div className="config-control">
+                    <label>Subtitle Style</label>
+                    <select value={buildpackSubtitleStyle} onChange={(e) => setBuildpackSubtitleStyle(e.target.value)}>
+                      {(buildpackOptions?.subtitle_styles || []).map((opt) => (
+                        <option key={opt.id} value={opt.id}>{opt.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="config-control">
+                    <label>Cloud Style</label>
+                    <select value={buildpackCloudStyle} onChange={(e) => setBuildpackCloudStyle(e.target.value)}>
+                      {(buildpackOptions?.cloud_styles || []).map((opt) => (
+                        <option key={opt.id} value={opt.id}>{opt.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="config-grid" style={{ marginTop: '0.75rem' }}>
+                  <div className="config-control">
+                    <label>Sample Text</label>
+                    <input value={buildpackSampleText} onChange={(e) => setBuildpackSampleText(e.target.value)} />
+                  </div>
+                  <div className="config-control">
+                    <label>Text Size</label>
+                    <input type="number" min="14" max="120" value={buildpackSampleSize} onChange={(e) => setBuildpackSampleSize(parseInt(e.target.value, 10) || 48)} />
+                  </div>
+                </div>
+
+                <div className="config-grid" style={{ marginTop: '0.75rem' }}>
+                  <div className="config-control">
+                    <label>Subtitle Scale</label>
+                    <input type="range" min="0.5" max="2.2" step="0.05" value={subtitleScale} onChange={(e) => setSubtitleScale(parseFloat(e.target.value))} />
+                  </div>
+                  <div className="config-control">
+                    <label>Cloud Width</label>
+                    <input type="range" min="0.12" max="0.9" step="0.01" value={cloudW} onChange={(e) => setCloudW(parseFloat(e.target.value))} />
+                  </div>
+                </div>
+
+                <div className="config-grid" style={{ marginTop: '0.75rem' }}>
+                  <div className="config-control">
+                    <label>Cloud Height</label>
+                    <input type="range" min="0.08" max="0.75" step="0.01" value={cloudH} onChange={(e) => setCloudH(parseFloat(e.target.value))} />
+                  </div>
+                  <div className="config-control">
+                    <label>Position Controls</label>
+                    <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                      <button className="btn" type="button" onClick={() => setSubtitleX((v) => nudge(v, -0.01))}>Subtitle -x</button>
+                      <button className="btn" type="button" onClick={() => setSubtitleX((v) => nudge(v, 0.01))}>Subtitle +x</button>
+                      <button className="btn" type="button" onClick={() => setSubtitleY((v) => nudge(v, -0.01))}>Subtitle -y</button>
+                      <button className="btn" type="button" onClick={() => setSubtitleY((v) => nudge(v, 0.01))}>Subtitle +y</button>
+                      <button className="btn" type="button" onClick={() => setCloudX((v) => nudge(v, -0.01))}>Cloud -x</button>
+                      <button className="btn" type="button" onClick={() => setCloudX((v) => nudge(v, 0.01))}>Cloud +x</button>
+                      <button className="btn" type="button" onClick={() => setCloudY((v) => nudge(v, -0.01))}>Cloud -y</button>
+                      <button className="btn" type="button" onClick={() => setCloudY((v) => nudge(v, 0.01))}>Cloud +y</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
+                  <button className="btn" type="button" onClick={saveBuildpackToSession} disabled={savingLayout || buildpackPreviewLoading}>
+                    {savingLayout ? 'Saving...' : 'Save As Session Image'}
+                  </button>
+                </div>
+
+                {buildpackSaveMessage && (
+                  <div style={{ marginTop: '0.5rem', color: buildpackSaveMessage.startsWith('Save failed') ? 'var(--danger)' : 'var(--text-accent)', fontSize: '0.8rem' }}>
+                    {buildpackSaveMessage}
+                  </div>
+                )}
+
+                <div style={{ marginTop: '0.6rem', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                  {buildpackPreviewLoading && 'Generating BuildPack overlay preview...'}
+                  {!buildpackPreviewLoading && buildpackPreviewBlobUrl && 'Preview ready'}
+                  {!buildpackPreviewLoading && buildpackPreviewError && <span style={{ color: 'var(--danger)' }}>{buildpackPreviewError}</span>}
+                </div>
+              </>
+            )}
+            </fieldset>
           </details>
 
+          <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '0.35rem 0 0.9rem' }} />
+
+          <details open style={{ marginBottom: '0.8rem' }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--text-accent)', marginBottom: '0.55rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>Step 1 - Planner</span>
+              <button className="btn" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSectionLock('planner'); }} style={{ padding: '0.2rem 0.35rem' }}>
+                {sectionLocks.planner ? <Lock size={14} /> : <Unlock size={14} />}
+              </button>
+            </summary>
+            <fieldset disabled={sectionLocks.planner} style={{ border: 'none', padding: 0, margin: 0 }}>
+            <div className="config-control">
+              <label>Narrative Prompt</label>
+              <textarea rows={6} value={narrativePrompt} onChange={(e) => setNarrativePrompt(e.target.value)} style={{ width: '100%', resize: 'vertical' }} />
+            </div>
+            <div className="config-grid" style={{ marginTop: '0.65rem' }}>
+              <div className="config-control">
+                <label>Episodes</label>
+                {sessionMode === 'existing' ? (
+                  <select value={episodesMode} onChange={(e) => setEpisodesMode(e.target.value)}>
+                    <option value="new">new</option>
+                    <option value="continue">continue</option>
+                  </select>
+                ) : (
+                  <input value="new (locked)" disabled />
+                )}
+              </div>
+              <div className="config-control">
+                <label>Episode Number (optional)</label>
+                <input value={targetEpisode} onChange={(e) => setTargetEpisode(e.target.value)} placeholder="e.g. 2" disabled={sessionMode !== 'existing'} />
+              </div>
+            </div>
+            <div className="config-control" style={{ marginTop: '0.65rem' }}>
+              <label>
+                <input type="checkbox" checked={sessionMode === 'existing' ? episodeMode : true} onChange={(e) => setEpisodeMode(e.target.checked)} disabled={sessionMode !== 'existing'} />
+                <span style={{ marginLeft: 6 }}>
+                  Episode Mode (on = continue series, off = single-video mode)
+                  {sessionMode !== 'existing' ? ' - locked for new sessions' : ''}
+                </span>
+              </label>
+            </div>
+            <div className="config-grid" style={{ marginTop: '0.65rem' }}>
+              <div className="config-control">
+                <label>Art Style</label>
+                <select value={preset} onChange={(e) => setPreset(e.target.value)}>
+                  <option value="cinematic_anime">Cinematic Anime</option>
+                  <option value="noir_comic">Noir Comic</option>
+                  <option value="sci_fi_neon">Sci-Fi Neon</option>
+                  <option value="horror_manga">Horror Manga</option>
+                </select>
+              </div>
+            </div>
+            <div className="config-grid" style={{ marginTop: '0.65rem' }}>
+              <div className="config-control">
+                <label>Max Images</label>
+                <input type="number" min="1" value={maxImageRequests} onChange={(e) => setMaxImageRequests(parseInt(e.target.value, 10) || 1)} />
+              </div>
+              <div className="config-control">
+                <label>Max Characters</label>
+                <input type="number" min="1" value={maxCharsPerEpisode} onChange={(e) => setMaxCharsPerEpisode(parseInt(e.target.value, 10) || 1)} />
+              </div>
+            </div>
+            <div className="config-grid" style={{ marginTop: '0.65rem' }}>
+              <div className="config-control">
+                <label>Max Panels</label>
+                <input type="number" min="1" value={maxPanelsPerEpisode} onChange={(e) => setMaxPanelsPerEpisode(parseInt(e.target.value, 10) || 1)} />
+              </div>
+              <div className="config-control">
+                <label>Max Duration (min)</label>
+                <input type="number" min="1" value={maxEpisodeDurationMins} onChange={(e) => setMaxEpisodeDurationMins(parseInt(e.target.value, 10) || 1)} />
+              </div>
+            </div>
+            <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="checkbox" checked={stepReset.planner} onChange={(e) => setStepReset((s) => ({ ...s, planner: e.target.checked }))} /> reset
+              </label>
+              <button className="btn" type="button" onClick={() => runNarrativeStep('planner')} disabled={stepBusy === 'planner'}>{stepBusy === 'planner' ? 'Running...' : 'Run Planner'}</button>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.planner || 'n/a'}</span>
+            </div>
+            </fieldset>
+          </details>
+
+          <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '0.35rem 0 0.9rem' }} />
+
+          <details open style={{ marginBottom: '0.8rem' }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--text-accent)', marginBottom: '0.55rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>Step 2 - Chars</span>
+              <button className="btn" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSectionLock('chars'); }} style={{ padding: '0.2rem 0.35rem' }}>
+                {sectionLocks.chars ? <Lock size={14} /> : <Unlock size={14} />}
+              </button>
+            </summary>
+            <fieldset disabled={sectionLocks.chars} style={{ border: 'none', padding: 0, margin: 0 }}>
+            {sessionMode === 'existing' ? (
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                Character source is controlled by files from selected session.
+              </div>
+            ) : (
+              <>
+                <div className="config-control">
+                  <label>Character in BuildPack</label>
+                  <select value={buildpackCharacterId} onChange={(e) => setBuildpackCharacterId(e.target.value)}>
+                    <option value="">None</option>
+                    {(buildpackOptions?.characters || []).map((opt) => (
+                      <option key={opt.id} value={opt.id}>{opt.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="config-grid" style={{ marginTop: '0.65rem' }}>
+                  <div className="config-control">
+                    <label>Source Session</label>
+                    <select value={sourceCharSession} onChange={(e) => setSourceCharSession(e.target.value)}>
+                      {sourceCharSessions.map((sid) => (
+                        <option key={sid} value={sid}>{sid}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="config-control">
+                    <label>Source Character</label>
+                    <select value={sourceCharPath} onChange={(e) => setSourceCharPath(e.target.value)}>
+                      <option value="">Select character file</option>
+                      {filteredSourceChars.map((c) => (
+                        <option key={c.path} value={c.path}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button className="btn" type="button" onClick={copyCharacterToSession} disabled={!sourceCharPath}>Copy Character To Session</button>
+                </div>
+              </>
+            )}
+            <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="checkbox" checked={stepReset.chars} onChange={(e) => setStepReset((s) => ({ ...s, chars: e.target.checked }))} /> reset
+              </label>
+              <button className="btn" type="button" onClick={() => runNarrativeStep('chars')} disabled={stepBusy === 'chars'}>{stepBusy === 'chars' ? 'Running...' : 'Run Chars'}</button>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.chars || 'n/a'}</span>
+            </div>
+            </fieldset>
+          </details>
+
+          <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '0.35rem 0 0.9rem' }} />
+
+          <details open style={{ marginBottom: '0.8rem' }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--text-accent)', marginBottom: '0.55rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>Step 3 - Scenes</span>
+              <button className="btn" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSectionLock('scenes'); }} style={{ padding: '0.2rem 0.35rem' }}>
+                {sectionLocks.scenes ? <Lock size={14} /> : <Unlock size={14} />}
+              </button>
+            </summary>
+            <fieldset disabled={sectionLocks.scenes} style={{ border: 'none', padding: 0, margin: 0 }}>
+            <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="checkbox" checked={stepReset.scenes} onChange={(e) => setStepReset((s) => ({ ...s, scenes: e.target.checked }))} /> reset
+              </label>
+              <button className="btn" type="button" onClick={() => runNarrativeStep('scenes')} disabled={stepBusy === 'scenes'}>{stepBusy === 'scenes' ? 'Running...' : 'Run Scenes'}</button>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.scenes || 'n/a'}</span>
+            </div>
+            </fieldset>
+          </details>
+
+          <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '0.35rem 0 0.9rem' }} />
+
+          <details open style={{ marginBottom: '0.8rem' }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--text-accent)', marginBottom: '0.55rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>Step 4 - Audio</span>
+              <button className="btn" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSectionLock('audio'); }} style={{ padding: '0.2rem 0.35rem' }}>
+                {sectionLocks.audio ? <Lock size={14} /> : <Unlock size={14} />}
+              </button>
+            </summary>
+            <fieldset disabled={sectionLocks.audio} style={{ border: 'none', padding: 0, margin: 0 }}>
+            <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="checkbox" checked={stepReset.audio} onChange={(e) => setStepReset((s) => ({ ...s, audio: e.target.checked }))} /> reset
+              </label>
+              <button className="btn" type="button" onClick={() => runNarrativeStep('audio')} disabled={stepBusy === 'audio'}>{stepBusy === 'audio' ? 'Running...' : 'Run Audio'}</button>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.audio || 'n/a'}</span>
+            </div>
+            </fieldset>
+          </details>
+
+          <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '0.35rem 0 0.9rem' }} />
+
+          <details open style={{ marginBottom: '0.8rem' }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--text-accent)', marginBottom: '0.55rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>Step 5 - Texts (Subtitles/Clouds)</span>
+              <button className="btn" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSectionLock('texts'); }} style={{ padding: '0.2rem 0.35rem' }}>
+                {sectionLocks.texts ? <Lock size={14} /> : <Unlock size={14} />}
+              </button>
+            </summary>
+            <fieldset disabled={sectionLocks.texts} style={{ border: 'none', padding: 0, margin: 0 }}>
+            <div className="config-control" style={{ marginTop: '0.5rem' }}>
+              <label>Texts Mode</label>
+              <select value={buildpackCloudStyle === 'cloud-none' ? 'subtitles_only' : 'clouds'} onChange={(e) => setBuildpackCloudStyle(e.target.value === 'subtitles_only' ? 'cloud-none' : 'cloud-soft-round')}>
+                <option value="subtitles_only">Subtitles Only</option>
+                <option value="clouds">Clouds</option>
+              </select>
+            </div>
+            <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="checkbox" checked={stepReset.texts} onChange={(e) => setStepReset((s) => ({ ...s, texts: e.target.checked }))} /> reset
+              </label>
+              <button className="btn" type="button" onClick={() => runNarrativeStep('texts')} disabled={stepBusy === 'texts'}>{stepBusy === 'texts' ? 'Running...' : 'Run Texts'}</button>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.texts || 'n/a'}</span>
+            </div>
+            </fieldset>
+          </details>
+
+          <hr style={{ border: 'none', borderTop: '1px solid var(--border-color)', margin: '0.35rem 0 0.9rem' }} />
+
+          <details open style={{ marginBottom: '0.8rem' }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--text-accent)', marginBottom: '0.55rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>Step 6 - Video</span>
+              <button className="btn" type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSectionLock('video'); }} style={{ padding: '0.2rem 0.35rem' }}>
+                {sectionLocks.video ? <Lock size={14} /> : <Unlock size={14} />}
+              </button>
+            </summary>
+            <fieldset disabled={sectionLocks.video} style={{ border: 'none', padding: 0, margin: 0 }}>
+            <div className="config-control" style={{ marginTop: '0.5rem' }}>
+              <label>Format</label>
+              <select value={format} onChange={(e) => setFormat(e.target.value)}>
+                <option value="tiktok">TikTok</option>
+                <option value="instagram_reels">Instagram Reels</option>
+                <option value="youtube_shorts">YouTube Shorts</option>
+                <option value="youtube_widescreen">YouTube Widescreen</option>
+              </select>
+            </div>
+            <div className="config-control" style={{ marginTop: '0.5rem' }}>
+              <label>
+                <input type="checkbox" checked={enableMusic} onChange={(e) => setEnableMusic(e.target.checked)} />
+                <span style={{ marginLeft: 6 }}>Enable Music</span>
+              </label>
+            </div>
+            <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="checkbox" checked={stepReset.video} onChange={(e) => setStepReset((s) => ({ ...s, video: e.target.checked }))} /> reset
+              </label>
+              <button className="btn" type="button" onClick={() => runNarrativeStep('video')} disabled={stepBusy === 'video'}>{stepBusy === 'video' ? 'Running...' : 'Run Video'}</button>
+              <button className="btn" type="button" onClick={() => runNarrativeStep('all')} disabled={stepBusy === 'all'}>{stepBusy === 'all' ? 'Running...' : 'Run End-to-End'}</button>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.video || 'n/a'}</span>
+            </div>
+            </fieldset>
+          </details>
+
+          {false && (
           <details open style={{ marginBottom: '0.8rem' }}>
             <summary style={{ cursor: 'pointer', color: 'var(--text-accent)', marginBottom: '0.55rem' }}>Narration & Style (with Preview)</summary>
             <div className="config-grid">
@@ -584,7 +1251,9 @@ export default function Agents() {
               </div>
             </div>
           </details>
+          )}
 
+          {false && (
           <details open style={{ marginBottom: '0.8rem' }}>
             <summary style={{ cursor: 'pointer', color: 'var(--text-accent)', marginBottom: '0.55rem' }}>Character Reuse (with Preview)</summary>
             <div className="config-grid">
@@ -661,66 +1330,7 @@ export default function Agents() {
               </div>
             )}
           </details>
-
-          <details style={{ marginBottom: '0.8rem' }}>
-            <summary style={{ cursor: 'pointer', color: 'var(--text-accent)', marginBottom: '0.55rem' }}>Generation Controls</summary>
-            <div className="config-grid" style={{ marginTop: '0.8rem' }}>
-              <div className="config-control">
-                <label>Theme</label>
-                <select value={theme} onChange={(e) => setTheme(e.target.value)}>
-                  <option value="scary_stories">Scary Stories</option>
-                  <option value="mystery_adventure">Mystery Adventure</option>
-                  <option value="slice_of_life">Slice of Life</option>
-                </select>
-              </div>
-              <div className="config-control">
-                <label>Art Style</label>
-                <select value={preset} onChange={(e) => setPreset(e.target.value)}>
-                  <option value="cinematic_anime">Cinematic Anime</option>
-                  <option value="noir_comic">Noir Comic</option>
-                  <option value="sci_fi_neon">Sci-Fi Neon</option>
-                  <option value="horror_manga">Horror Manga</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="config-grid" style={{ marginTop: '0.8rem' }}>
-              <div className="config-control">
-                <label>Format</label>
-                <select value={format} onChange={(e) => setFormat(e.target.value)}>
-                  <option value="tiktok">TikTok</option>
-                  <option value="instagram_reels">Instagram Reels</option>
-                  <option value="youtube_shorts">YouTube Shorts</option>
-                  <option value="youtube_widescreen">YouTube Widescreen</option>
-                </select>
-              </div>
-              <div className="config-control">
-                <label>
-                  <input type="checkbox" checked={enableMusic} onChange={(e) => setEnableMusic(e.target.checked)} />
-                  <span style={{ marginLeft: 6 }}>Enable Music</span>
-                </label>
-              </div>
-            </div>
-
-            <div className="config-grid" style={{ marginTop: '0.8rem' }}>
-              <div className="config-control">
-                <label>Max Images</label>
-                <input type="number" min="1" value={maxImageRequests} onChange={(e) => setMaxImageRequests(parseInt(e.target.value, 10) || 1)} />
-              </div>
-              <div className="config-control">
-                <label>Max Characters</label>
-                <input type="number" min="1" value={maxCharsPerEpisode} onChange={(e) => setMaxCharsPerEpisode(parseInt(e.target.value, 10) || 1)} />
-              </div>
-              <div className="config-control">
-                <label>Max Panels</label>
-                <input type="number" min="1" value={maxPanelsPerEpisode} onChange={(e) => setMaxPanelsPerEpisode(parseInt(e.target.value, 10) || 1)} />
-              </div>
-              <div className="config-control">
-                <label>Max Duration (min)</label>
-                <input type="number" min="1" value={maxEpisodeDurationMins} onChange={(e) => setMaxEpisodeDurationMins(parseInt(e.target.value, 10) || 1)} />
-              </div>
-            </div>
-          </details>
+          )}
 
           <button className="btn btn-primary" style={{ marginTop: '1rem', width: '100%' }} onClick={() => startAgent(selectedAgent)} disabled={running}>
             {running ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />} Run {AGENTS_LIST.find((a) => a.id === selectedAgent)?.name}
@@ -756,6 +1366,14 @@ export default function Agents() {
             <div style={{ flex: 1, minHeight: 0, padding: '1rem', borderRadius: '12px', background: 'var(--bg-surface)', overflow: 'hidden' }}>
               {selectedFile ? (
                 <FilePreviewPane selectedFile={selectedFile} apiBase={API_BASE} mediaBase={MEDIA_BASE} libraryMediaBase={LIBRARY_MEDIA_BASE} />
+              ) : sessionMode === 'new' && buildpackPreviewBlobUrl ? (
+                <div style={{ height: '100%', width: '100%', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <img
+                    src={buildpackPreviewBlobUrl}
+                    alt="BuildPack preview"
+                    style={{ maxWidth: '100%', maxHeight: '100%', display: 'block', margin: '0 auto', borderRadius: 10, border: '1px solid var(--border-color)' }}
+                  />
+                </div>
               ) : configPreview?.type === 'style' ? (
                 <div
                   style={{
