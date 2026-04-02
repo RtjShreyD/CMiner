@@ -15,8 +15,8 @@ from typing import Dict, Any, List
 
 
 class TTSGen:
-    def __init__(self):
-        pass
+    def __init__(self, voices_pool: Dict[str, List[str]] = None):
+        self.voices_pool = voices_pool or {}
 
     def run(self, manga_board: Dict[str, Any], session_dir: Path) -> List[str]:
         print("--- Pipeline: TTS Generation ---")
@@ -30,7 +30,24 @@ class TTSGen:
         voice_map: Dict[str, str] = {}
         for char in characters:
             name = char.get("name")
-            voice = char.get("assigned_voice", "en-US-AriaNeural")
+            assigned_voice = char.get("assigned_voice")
+            voice_profile = char.get("voice_profile")
+            voice = assigned_voice
+
+            if not voice and voice_profile and voice_profile in self.voices_pool:
+                candidates = self.voices_pool.get(voice_profile, [])
+                voice = candidates[0] if candidates else None
+
+            if not voice:
+                # fallback to first available voice from any category
+                for vcs in self.voices_pool.values():
+                    if vcs:
+                        voice = vcs[0]
+                        break
+
+            if not voice:
+                voice = "en-US-AriaNeural"
+
             voice_map[name] = voice
 
         audio_files: List[str] = []

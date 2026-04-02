@@ -1,0 +1,25 @@
+{
+  "id": "font-dejavu-sans-whisper-clean-editorial",
+  "name": "DejaVu Sans Whisper Clean Editorial",
+  "category": "subtitle",
+  "version": "v1",
+  "tags": [
+    "generated",
+    "cloud-text",
+    "whisper",
+    "clean-editorial"
+  ],
+  "status": "active",
+  "preview_assets": {
+    "thumbnail": "library/styles/previews/generated/font-dejavu-sans-whisper-clean-editorial.png",
+    "sample_text": "The city whispered: run now."
+  },
+  "config_json": {
+    "font_family": "DejaVu Sans",
+    "font_file": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "cloud_kind": "whisper",
+    "text_style": "clean-editorial",
+    "stroke_width": 2,
+    "font_size": 52
+  }
+}

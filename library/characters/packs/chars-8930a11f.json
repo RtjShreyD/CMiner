@@ -1,0 +1,32 @@
+{
+  "id": "chars-8930a11f",
+  "name": "Core Detective Cast",
+  "style_profile_id": null,
+  "source_agent": "charGen",
+  "tags": [
+    "manga",
+    "detective"
+  ],
+  "preview_assets": {
+    "thumbnail": "library/characters/previews/chars-8930a11f/kaelen-thorne.png"
+  },
+  "characters": [
+    {
+      "character_id": "kaelen-thorne",
+      "display_name": "Kaelen Thorne",
+      "archetype": "hero",
+      "visual_prompt": "Tall detective in futuristic trench coat",
+      "tags": [
+        "lead"
+      ],
+      "anchor_images": [
+        "library/characters/previews/chars-8930a11f/kaelen-thorne.png"
+      ],
+      "metadata": {
+        "voice_profile": "hero"
+      }
+    }
+  ],
+  "created_at": "2026-04-02T15:43:30.196004+00:00",
+  "updated_at": "2026-04-02T15:43:30.196004+00:00"
+}

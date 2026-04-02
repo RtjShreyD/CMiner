@@ -22,6 +22,7 @@ class EpisodePlanner:
         max_chars: int = 5,
         max_panels: int = 15,
         art_style: str = "cinematic anime",
+        theme: str = None,
         tracker: Optional[LLMTracker] = None,
     ):
         self.model_name = model_name
@@ -30,6 +31,7 @@ class EpisodePlanner:
         self.max_chars = max_chars
         self.max_panels = max_panels
         self.art_style = art_style
+        self.theme = theme
         self.tracker = tracker
 
     def run(self, base_prompt: str, session_dir: Path) -> Dict[str, Any]:
@@ -97,9 +99,12 @@ class EpisodePlanner:
                 "- Ending with a cliffhanger or significant story beat\n"
             )
 
+        theme_text = f"THEME: {self.theme}\n" if self.theme else ""
+
         prompt = (
             f"You are a master manga storyboard artist and narrative designer.\n\n"
             f"BASE STORY PREMISE:\n{base_prompt}\n"
+            f"{theme_text}"
             f"DEFAULT ART STYLE: {self.art_style}\n"
             f"{prior_context}\n"
             f"EPISODE TYPE:\n{episode_type}\n"

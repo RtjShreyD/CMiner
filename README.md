@@ -94,6 +94,15 @@ Similar to the Podcasting agent, NarrativeManga can be run step-by-step:
 - `clouds`: Dynamic speech bubble placement (OpenCV).
 - `video`: Final FFmpeg assembly.
 
+#### ✨ New narrativeManga features (in this branch)
+- Theme preset support (`--theme`) for narrative templates (scary stories, mystery, slice-of-life).
+- Art style presets (`--preset`) and multi-output format presets (`--format`, including tiktok/instagram/youtube specs).
+- Configuration in `agents/narrativeManga/config.json` for themes, art_styles, output_presets, and voice pools.
+- UI form with theme/art/format options in `web-studio/src/pages/Agents.jsx`.
+- `MovieMaker` now supports optional music mixing (`--enable_music`) and auto metadata/thumbnail generation.
+- Anchor metadata support in char generation (`char_anchors.json`) for better scene consistency.
+- Session instrumentation in `session_state.json` includes settings and run metadata.
+
 > [!IMPORTANT]
 > **Character Consistency**: This agent uses multimodal anchoring. Portraits generated in the `chars` step are used as references for all subsequent `scenes`, ensuring characters look the same across the entire series.
 

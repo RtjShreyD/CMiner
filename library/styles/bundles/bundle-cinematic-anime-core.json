@@ -1,0 +1,17 @@
+{
+  "id": "bundle-cinematic-anime-core",
+  "name": "Cinematic Anime Core",
+  "font_profile_id": "font-inter-clean",
+  "cloud_profile_id": "cloud-fluffy-default",
+  "subtitle_profile_id": "subtitle-neon-clean",
+  "render_profile_id": "render-cinematic-anime-v1",
+  "character_style_profile_id": null,
+  "tags": [
+    "starter",
+    "manga"
+  ],
+  "preview_assets": {
+    "thumbnail": "library/styles/previews/bundle-cinematic-anime-core.png"
+  },
+  "notes": "Balanced readability and cinematic tone"
+}

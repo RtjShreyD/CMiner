@@ -1,0 +1,32 @@
+{
+  "id": "pack-kaelen-prototype-1775144778",
+  "name": "Kaelen Prototype pack",
+  "style_profile_id": "cinematic anime",
+  "source_agent": "charGen",
+  "tags": [
+    "generated",
+    "gemini"
+  ],
+  "preview_assets": {
+    "thumbnail": "library/characters/generated/kaelen-prototype-1775144778.png"
+  },
+  "characters": [
+    {
+      "character_id": "kaelen-prototype",
+      "display_name": "Kaelen Prototype",
+      "archetype": "custom",
+      "visual_prompt": "A stoic cyber detective with an obsidian trench coat and glowing circuit tattoos.",
+      "tags": [
+        "cinematic anime"
+      ],
+      "anchor_images": [
+        "library/characters/generated/kaelen-prototype-1775144778.png"
+      ],
+      "metadata": {
+        "generated_by": "generate-preview"
+      }
+    }
+  ],
+  "created_at": "2026-04-02T15:46:26.596205+00:00",
+  "updated_at": "2026-04-02T15:46:26.596205+00:00"
+}

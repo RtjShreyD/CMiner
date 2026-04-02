@@ -104,6 +104,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="When used with --episodes continue, also runs generation chains.",
     )
 
+    char_gen_parser = subparsers.add_parser(
+        "charGen",
+        help="Generate reusable character packs",
+        description="Create character packs in library/characters",
+    )
+    char_gen_parser.add_argument("--workspace", default=".", help="Workspace root")
+    char_gen_parser.add_argument("--prompt", default="A cinematic manga ensemble cast", help="Character brief")
+    char_gen_parser.add_argument("--style", default="cinematic_anime", help="Style profile id")
+    char_gen_parser.add_argument("--count", type=int, default=3, help="Number of characters")
+    char_gen_parser.add_argument("--pack-id", help="Optional fixed pack id")
+
     subparsers.add_parser(
         "studio",
         help="Launch the CMiner Studio TUI (Terminal User Interface)",
@@ -230,6 +241,34 @@ def _run_narrative_manga(
     return proc.returncode
 
 
+def _run_char_gen(
+    workspace: str,
+    prompt: str,
+    style: str,
+    count: int,
+    pack_id: str | None = None,
+) -> int:
+    runner_script = ROOT / "agents" / "charGen" / "run.py"
+    venv_python = ROOT / ".venv" / "bin" / "python3"
+
+    cmd = [
+        str(venv_python) if venv_python.exists() else sys.executable,
+        str(runner_script),
+        "--workspace",
+        workspace,
+        "--prompt",
+        prompt,
+        "--style",
+        style,
+        "--count",
+        str(count),
+    ]
+    if pack_id:
+        cmd.extend(["--pack-id", pack_id])
+    proc = subprocess.run(cmd, check=False)
+    return proc.returncode
+
+
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args(sys.argv[1:])
@@ -281,6 +320,17 @@ def main() -> None:
                 episode=args.episode,
                 episodes=args.episodes,
                 develop=args.develop,
+            )
+        )
+
+    if args.command == "charGen":
+        raise SystemExit(
+            _run_char_gen(
+                workspace=args.workspace,
+                prompt=args.prompt,
+                style=args.style,
+                count=args.count,
+                pack_id=args.pack_id,
             )
         )
 

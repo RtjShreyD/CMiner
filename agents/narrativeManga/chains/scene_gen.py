@@ -46,6 +46,19 @@ class SceneGen:
         characters = manga_board.get("characters", [])
         char_visuals = {c["name"]: c.get("visual_prompt", c.get("description", "")) for c in characters}
 
+        # Load anchor-based descriptions when available
+        char_anchors_path = session_dir / "chars" / "char_anchors.json"
+        if char_anchors_path.exists():
+            try:
+                with open(char_anchors_path, "r") as f:
+                    char_anchors = json.load(f)
+                for name, data in char_anchors.items():
+                    prompt_text = data.get("visual_prompt") or char_visuals.get(name)
+                    if prompt_text:
+                        char_visuals[name] = prompt_text
+            except Exception as e:
+                print(f"  ⚠️ Warning: failed to load char anchors: {e}")
+
         manifest: Dict[str, str] = {}
         gen_count = 0
 
@@ -74,12 +87,13 @@ class SceneGen:
                 char_snippets.append(f"{cname}: {vis}")
             chars_in_scene = "; ".join(char_snippets) if char_snippets else "No specific characters"
 
+            width, height = self.resolution
             prompt = (
                 f"A cinematic manga panel. {scene_desc}. "
                 f"Camera: {camera}. Mood: {mood}. "
                 f"Characters in scene: {chars_in_scene}. "
                 f"Art style: {self.art_style}. "
-                f"CRITICAL: 16:9, 1280x720."
+                f"CRITICAL: {width}:{height} aspect (exact {width}x{height}) resolution."
             )
 
             print(f"Generating ({gen_count + 1}/{self.max_generations}): {panel_key} ({camera}, {mood})")

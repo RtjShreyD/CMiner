@@ -29,6 +29,15 @@ def main():
         default="new",
         help="'new' starts a fresh series. 'continue' plans the next episode from prior context.",
     )
+    parser.add_argument("--theme", help="Theme key from config themes")
+    parser.add_argument("--preset", help="Style preset key from config art_styles")
+    parser.add_argument("--format", choices=["tiktok","instagram_reels","youtube_shorts","youtube_widescreen"], help="Output format preset")
+    parser.add_argument("--vector_upscale", action="store_true", help="Apply upscale stub after image generation")
+    parser.add_argument("--enable_music", action="store_true", help="Include background music in final video")
+    parser.add_argument("--max_image_requests", type=int, help="Maximum total image requests")
+    parser.add_argument("--max_chars_per_episode", type=int, help="Maximum characters in one episode")
+    parser.add_argument("--max_panels_per_episode", type=int, help="Maximum panel count in one episode")
+    parser.add_argument("--max_episode_duration_mins", type=int, help="Maximum episode duration minutes")
     parser.add_argument(
         "--develop",
         action="store_true",
@@ -66,22 +75,45 @@ def main():
     max_chars = models_config.get("max_chars_per_episode", 5)
     max_panels = models_config.get("max_panels_per_episode", 15)
     max_duration = models_config.get("max_episode_duration_mins", 5)
+
+    if args.max_image_requests:
+        max_image_requests = args.max_image_requests
+    if args.max_chars_per_episode:
+        max_chars = args.max_chars_per_episode
+    if args.max_panels_per_episode:
+        max_panels = args.max_panels_per_episode
+    if args.max_episode_duration_mins:
+        max_duration = args.max_episode_duration_mins
     tts_voices_pool = config.get("tts_voices_pool", {})
+
+    # Style/theme presets
+    themes = config.get("themes", {})
+    art_styles = config.get("art_styles", {})
+    output_presets = config.get("output_presets", {})
+
+    base_prompt = args.prompt or ""
+    if args.theme and args.theme in themes and not base_prompt:
+        base_prompt = themes[args.theme]
+
+    if args.preset and args.preset in art_styles:
+        art_style = art_styles[args.preset]
+    else:
+        art_style = config.get("art_style", "cinematic anime")
+
     video_config = config.get("video", {})
     resolution = tuple(video_config.get("resolution", [1280, 720]))
     fps = video_config.get("fps", 8)
     target_duration = video_config.get("target_duration_mins", 5)
-    art_style = config.get("art_style", "cinematic anime")
 
-    # ── State Management ──────────────────────────────────────
-    state_path = session_dir / "session_state.json"
-    state = _load_state(state_path)
+    if args.format and args.format in output_presets:
+        preset_cfg = output_presets[args.format]
+        resolution = tuple(preset_cfg.get("resolution", list(resolution)))
+        fps = preset_cfg.get("fps", fps)
+        target_duration = preset_cfg.get("duration_mins", target_duration)
 
-    print(f"Session: {session_dir}")
-    print(f"Config: fps={fps}, max_image_requests={max_image_requests}, max_chars={max_chars}")
+    enable_music = args.enable_music
+    vector_upscale = args.vector_upscale
 
-    # ── Resolve Base Prompt ───────────────────────────────────
-    base_prompt = args.prompt
     if not base_prompt:
         prompt_file = Path(__file__).resolve().parent / "prompt.txt"
         if prompt_file.exists():
@@ -89,6 +121,28 @@ def main():
             print(f"Loaded base prompt from {prompt_file}")
         else:
             base_prompt = "A dramatic manga story."
+
+    # ── State Management ──────────────────────────────────────
+    state_path = session_dir / "session_state.json"
+    state = _load_state(state_path)
+
+    state.setdefault("settings", {}).update({
+        "theme": args.theme,
+        "preset": args.preset,
+        "format": args.format,
+        "resolution": list(resolution),
+        "fps": fps,
+        "enable_music": enable_music,
+        "vector_upscale": vector_upscale,
+        "max_image_requests": max_image_requests,
+        "max_chars_per_episode": max_chars,
+        "max_panels_per_episode": max_panels,
+        "max_episode_duration_mins": max_duration,
+    })
+    _save_state(state_path, state)
+
+    print(f"Session: {session_dir}")
+    print(f"Config: fps={fps}, max_image_requests={max_image_requests}, max_chars={max_chars}")
 
     # ── Determine what to run ─────────────────────────────────
     # --episodes continue: plan-only by default
@@ -110,6 +164,7 @@ def main():
             max_chars=max_chars,
             max_panels=max_panels,
             art_style=art_style,
+            theme=args.theme,
             tracker=tracker,
         )
         manga_board = planner.run(base_prompt, session_dir)
@@ -192,7 +247,7 @@ def main():
     if args.step in ["all", "audio"] or (run_generation and not run_specific_step):
         from agents.narrativeManga.chains.tts_gen import TTSGen
 
-        tts_gen = TTSGen()
+        tts_gen = TTSGen(voices_pool=tts_voices_pool)
         audio_files = tts_gen.run(manga_board, session_dir)
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["audio_generated"] = True
         _save_state(state_path, state)
@@ -224,11 +279,15 @@ def main():
                 + [str(p) for p in audio_dir.glob("panel_*.wav")]
             )
 
-        maker = MovieMaker(fps=fps, resolution=resolution)
+        maker = MovieMaker(fps=fps, resolution=resolution, enable_music=enable_music)
         final_video = maker.run(manga_board, scenes_manifest, audio_files, session_dir)
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["status"] = "complete"
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["video"] = str(final_video)
         _save_state(state_path, state)
+
+        if vector_upscale:
+            print("Vector upscale requested, stub behavior: upscaling is not yet implemented.")
+
         print(f"Task Complete. Final Output: {final_video}")
     elif run_specific_step:
         print(f"Step '{args.step}' complete in {session_dir}")

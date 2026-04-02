@@ -61,12 +61,13 @@ class CharGen:
                 continue
 
             visual_prompt = char.get("visual_prompt", char.get("description", "An anime character"))
+            width, height = self.resolution
             prompt = (
                 f"A full-body character portrait for manga. "
                 f"{visual_prompt}. "
                 f"Art style: {self.art_style}. "
                 f"Clean background, professional character sheet style. "
-                f"CRITICAL: 16:9, 1280x720 resolution."
+                f"CRITICAL: {width}:{height} aspect (exact {width}x{height}) resolution."
             )
 
             print(f"Generating portrait ({gen_count + 1}/{self.max_generations}): {name}")
@@ -112,11 +113,27 @@ class CharGen:
             if anchor_path is None:
                 anchor_path = char_path
 
+        # Save manifest and anchor metadata for cross-step consistency
         manifest_path = chars_dir / "chars_manifest.json"
         with open(manifest_path, "w") as f:
             json.dump(manifest, f, indent=2)
 
+        anchors = {}
+        for char in characters:
+            name = char.get("name")
+            if name and name in manifest:
+                anchors[name] = {
+                    "image": manifest[name],
+                    "visual_prompt": char.get("visual_prompt", char.get("description", "")),
+                    "style": self.art_style,
+                }
+
+        anchor_path = chars_dir / "char_anchors.json"
+        with open(anchor_path, "w") as f:
+            json.dump(anchors, f, indent=2)
+
         print(f"Character manifest: {len(manifest)} characters ({gen_count} generated)")
+        print(f"Character anchors saved to {anchor_path}")
         return manifest
 
     def _force_resize(self, img_path: Path):

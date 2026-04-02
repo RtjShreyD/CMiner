@@ -8,6 +8,8 @@ from pydantic import BaseModel
 router = APIRouter()
 OUTPUTS_DIR = Path("outputs")
 
+MEANINGFUL_FILE_SIZE_BYTES = 512
+
 class FileItem(BaseModel):
     name: str
     path: str
@@ -15,8 +17,26 @@ class FileItem(BaseModel):
     size: int | None = None
     extension: str | None = None
 
+
+def _has_meaningful_content(path: Path) -> bool:
+    if path.is_file():
+        try:
+            return path.stat().st_size > MEANINGFUL_FILE_SIZE_BYTES
+        except OSError:
+            return False
+
+    try:
+        for child in path.iterdir():
+            if child.name.startswith("__"):
+                continue
+            if _has_meaningful_content(child):
+                return True
+    except OSError:
+        return False
+    return False
+
 @router.get("/tree")
-async def get_directory_tree(path: str = "") -> list[FileItem]:
+async def get_directory_tree(path: str = "", include_empty: bool = False) -> list[FileItem]:
     """Returns the contents of a directory within outputs/."""
     target_dir = OUTPUTS_DIR / path
     
@@ -35,6 +55,9 @@ async def get_directory_tree(path: str = "") -> list[FileItem]:
     items = []
     for entry in target_dir.iterdir():
         if entry.name.startswith("__"):
+            continue
+
+        if not include_empty and not _has_meaningful_content(entry):
             continue
             
         items.append(FileItem(

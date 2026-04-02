@@ -1,0 +1,32 @@
+{
+  "id": "pack-preview-detective-1775140603",
+  "name": "Preview Detective pack",
+  "style_profile_id": "cinematic anime",
+  "source_agent": "charGen",
+  "tags": [
+    "generated",
+    "gemini"
+  ],
+  "preview_assets": {
+    "thumbnail": "library/characters/generated/preview-detective-1775140603.png"
+  },
+  "characters": [
+    {
+      "character_id": "preview-detective",
+      "display_name": "Preview Detective",
+      "archetype": "custom",
+      "visual_prompt": "A confident manga detective with electric blue coat",
+      "tags": [
+        "cinematic anime"
+      ],
+      "anchor_images": [
+        "library/characters/generated/preview-detective-1775140603.png"
+      ],
+      "metadata": {
+        "generated_by": "generate-preview"
+      }
+    }
+  ],
+  "created_at": "2026-04-02T14:36:53.447870+00:00",
+  "updated_at": "2026-04-02T14:36:53.447870+00:00"
+}

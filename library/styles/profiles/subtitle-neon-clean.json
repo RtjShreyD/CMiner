@@ -1,0 +1,19 @@
+{
+  "id": "subtitle-neon-clean",
+  "name": "Neon Clean Subtitle",
+  "category": "subtitle",
+  "version": "v1",
+  "tags": [
+    "subtitle",
+    "neon"
+  ],
+  "status": "active",
+  "preview_assets": {
+    "thumbnail": "library/styles/previews/subtitle-neon-clean.png"
+  },
+  "config_json": {
+    "font_size": 42,
+    "outline": 2,
+    "shadow": 1
+  }
+}

@@ -158,3 +158,65 @@ a:hover { color: var(--success); }
 /* Utility Animations */
 @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+
+/* Responsive config block */
+.config-panel { margin-top: 0.75rem; }
+.config-section-title { margin: 0 0 0.5rem; color: var(--text-accent); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.65rem; }
+.config-control { display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.85rem; }
+.config-control label { color: var(--text-muted); font-size: 0.81rem; font-weight: 500; }
+.config-control select,
+.config-control input[type="number"] {
+  border: 1px solid var(--border-color);
+  background: var(--bg-surface);
+  color: var(--text-main);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+}
+.config-control input[type="checkbox"] { width: auto; margin-top: 0.15rem; }
+
+@media (max-width: 900px) {
+  .sidebar { width: 220px; }
+  .main-content { overflow-x: hidden; }
+  .config-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+}
+
+/* Canvas + Console panel styles */
+.canvas-panel { min-height: 250px; color: var(--text-muted); border: 1px dashed rgba(148, 163, 184, 0.4); }
+.console-panel { overflow: hidden; }
+
+/* rc-tree dark theme overrides */
+.rc-tree {
+  color: var(--text-main);
+}
+
+.rc-tree .rc-tree-node-content-wrapper {
+  border-radius: 6px;
+  padding: 0.2rem 0.45rem;
+}
+
+.rc-tree .rc-tree-node-selected,
+.rc-tree .rc-tree-node-content-wrapper.rc-tree-node-selected,
+.rc-tree .rc-tree-treenode .rc-tree-node-content-wrapper.rc-tree-node-selected {
+  background-color: #1f2337 !important;
+  box-shadow: 0 0 0 1px #2f3654 !important;
+  color: var(--text-main) !important;
+  opacity: 1 !important;
+}
+
+.rc-tree .rc-tree-node-selected:hover,
+.rc-tree .rc-tree-node-content-wrapper.rc-tree-node-selected:hover,
+.rc-tree .rc-tree-treenode .rc-tree-node-content-wrapper.rc-tree-node-selected:hover {
+  background-color: #252b45 !important;
+}
+
+.rc-tree .rc-tree-treenode-active,
+.rc-tree .rc-tree-node-content-wrapper.rc-tree-treenode-active {
+  background-color: #1a1e31 !important;
+}
+
+.rc-tree .rc-tree-title {
+  color: inherit;
+}
+
+

@@ -1,0 +1,18 @@
+{
+  "id": "cloud-thought-neo",
+  "name": "Neo Thought Bubble",
+  "category": "cloud",
+  "version": "v1",
+  "tags": [
+    "thought",
+    "manga"
+  ],
+  "status": "active",
+  "preview_assets": {
+    "thumbnail": "library/styles/previews/cloud-thought-neo.png"
+  },
+  "config_json": {
+    "shape": "cloud-dot-tail",
+    "tail": "thought"
+  }
+}

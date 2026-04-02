@@ -10,9 +10,9 @@ load_dotenv()
 # Configure Gemini
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY not found in environment.")
-
-genai.configure(api_key=GEMINI_API_KEY)
+    print("Warning: GEMINI_API_KEY not found in environment; proceeding in non-API/mock mode.")
+else:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 
 def _new_session_id() -> str:

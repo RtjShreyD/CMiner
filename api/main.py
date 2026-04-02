@@ -10,16 +10,22 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from api.routers import sessions, agents
+from api.routers import sessions, agents, styles, characters
 from api.models import create_db_and_tables
+from api.services.registry_store import ensure_library_dirs, ensure_subdirs, seed_default_styles
 
 # Configuration
 OUTPUTS_DIR = Path("outputs")
+LIBRARY_DIR = Path("library")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Ensure outputs exists
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_library_dirs()
+    ensure_subdirs()
+    seed_default_styles()
     # Database init
     create_db_and_tables()
     yield
@@ -41,13 +47,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount outputs for direct native media streaming in the browser
+# Mount outputs and library for direct media streaming in the browser
 # e.g., <video src="http://localhost:8000/media/something.mp4">
+# e.g., <img src="http://localhost:8000/library-media/characters/...png">
 app.mount("/media", StaticFiles(directory=OUTPUTS_DIR), name="media")
+app.mount("/library-media", StaticFiles(directory=LIBRARY_DIR), name="library-media")
 
 # Routers
 app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
+app.include_router(styles.router, prefix="/api/styles", tags=["styles"])
+app.include_router(characters.router, prefix="/api/characters", tags=["characters"])
 
 @app.get("/api/health")
 async def health_check():

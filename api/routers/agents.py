@@ -9,6 +9,24 @@ router = APIRouter()
 class RunAgentRequest(BaseModel):
     agent_name: str
     cmd_args: str | None = None
+    prompt: str | None = None
+    theme: str | None = None
+    preset: str | None = None
+    format: str | None = None
+    cloud_style: str | None = None
+    font_style: str | None = None
+    session_mode: str = "new"
+    session_path: str | None = None
+    enable_music: bool = False
+    narration_mode: str | None = None
+    character_pack_id: str | None = None
+    reuse_session_chars: bool = False
+    session_chars_path: str | None = None
+    selected_session_character: str | None = None
+    max_image_requests: int | None = None
+    max_chars_per_episode: int | None = None
+    max_panels_per_episode: int | None = None
+    max_episode_duration_mins: int | None = None
 
 @router.post("/run")
 async def start_agent_run(req: RunAgentRequest):
