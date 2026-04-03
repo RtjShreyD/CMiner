@@ -1,0 +1,20 @@
+{
+  "id": "font-inter-clean",
+  "name": "Inter Clean",
+  "category": "font",
+  "version": "v1",
+  "tags": [
+    "modern",
+    "readable"
+  ],
+  "status": "active",
+  "preview_assets": {
+    "sample_text": "The quick brown fox jumps over the lazy dog.",
+    "thumbnail": "library/styles/previews/font-inter-clean.png"
+  },
+  "config_json": {
+    "family": "Inter",
+    "weight": 500,
+    "stroke": 1
+  }
+}

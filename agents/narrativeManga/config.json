@@ -8,20 +8,49 @@
     "max_panels_per_episode": 50,
     "max_episode_duration_mins": 5
   },
-  "tts_voices_pool": {
-    "en-US-AriaNeural": "English (US), Female, Professional/Engaging",
-    "en-US-ChristopherNeural": "English (US), Male, Reliable/Authoritative",
-    "en-GB-SoniaNeural": "English (UK), Female, Cheerful",
-    "en-GB-RyanNeural": "English (UK), Male, Professional",
-    "en-IN-NeerjaNeural": "English (India), Female, Clear",
-    "en-IN-PrabhatNeural": "English (India), Male, Clear",
-    "hi-IN-SwaraNeural": "Hindi (India), Female, Friendly",
-    "hi-IN-MadhurNeural": "Hindi (India), Male, Friendly"
+  "voice_profiles": {
+    "narrator": ["en-US-AriaNeural", "en-GB-SoniaNeural"],
+    "hero": ["en-US-ChristopherNeural"],
+    "villain": ["en-GB-RyanNeural"],
+    "support": ["en-IN-NeerjaNeural", "hi-IN-SwaraNeural"]
   },
   "video": {
     "resolution": [1280, 720],
     "fps": 8,
     "target_duration_mins": 5
   },
-  "art_style": "cinematic anime, atmospheric lighting, detailed linework, consistent character design, seinen manga aesthetic with dramatic color palette"
+  "art_style": "cinematic anime, atmospheric lighting, detailed linework, consistent character design, seinen manga aesthetic with dramatic color palette",
+  "themes": {
+    "scary_stories": "A dark, suspenseful script with cliffhangers, ominous imagery, and intense reveal moments.",
+    "mystery_adventure": "A mystery/adventure tone with curiosity-driven hook, plot twists, and structured reveal.",
+    "slice_of_life": "A warm, calm slice-of-life narrative with relatable character moments and gentle humour.",
+    "magic_show": "A theatrical magic-show narrative with wonder, misdirection, reveal beats, and crowd reactions.",
+    "sci_fi_epic": "A sweeping sci-fi tone with futuristic worldbuilding, high-stakes conflict, and awe-driven discoveries.",
+    "comedy_sketch": "A light comedy rhythm with witty banter, situational humor, and punchline-driven scene transitions.",
+    "cartoon_adventure": "A playful cartoon-adventure tone with exaggerated action, bright emotional swings, and family-friendly fun.",
+    "ghibli_wonder": "A gentle, whimsical tone inspired by pastoral wonder, emotional intimacy, and environmental magic."
+  },
+  "art_styles": {
+    "cinematic_anime": "cinematic anime, high detail, dynamic dramatic composition, volumetric lighting",
+    "noir_comic": "black-and-white noir comic, textured inking, strong contrast, moody lighting",
+    "sci_fi_neon": "neon sci-fi, futuristic cityscape, high saturation chromatic highlights",
+    "horror_manga": "horror manga, gritty shadows, dramatic facial expressions, eerie atmosphere",
+    "magic_illusion_stage": "fantasy magic-show stage aesthetic, luminous spell effects, velvet curtains, theatrical spotlighting",
+    "comedy_cartoon": "clean cartoon linework, expressive faces, comedic timing poses, bright saturated color palette",
+    "ghibli_watercolor": "soft hand-painted watercolor anime style, warm natural lighting, lush backgrounds, whimsical atmosphere",
+    "retro_pop_comic": "retro pop comic halftone textures, bold outlines, dynamic captions, vibrant primary colors",
+    "space_opera_cinematic": "space-opera cinematic concept art, nebula backdrops, epic framing, dramatic rim lighting"
+  },
+  "output_presets": {
+    "tiktok": {"resolution": [1080, 1920], "fps": 30, "duration_mins": 1, "aspect": "9:16"},
+    "instagram_reels": {"resolution": [1080, 1920], "fps": 30, "duration_mins": 1, "aspect": "9:16"},
+    "youtube_shorts": {"resolution": [1080, 1920], "fps": 30, "duration_mins": 1, "aspect": "9:16"},
+    "youtube_widescreen": {"resolution": [1920, 1080], "fps": 30, "duration_mins": 5, "aspect": "16:9"}
+  },
+  "tts_voices_pool": {
+    "narrator": ["en-US-AriaNeural", "en-GB-SoniaNeural"],
+    "hero": ["en-US-ChristopherNeural"],
+    "villain": ["en-GB-RyanNeural"],
+    "support": ["en-IN-NeerjaNeural", "hi-IN-SwaraNeural"]
+  }
 }

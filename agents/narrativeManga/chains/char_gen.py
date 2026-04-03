@@ -7,7 +7,6 @@ Art style is enforced from config for cross-episode consistency.
 """
 
 import json
-import random
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 
@@ -32,7 +31,45 @@ class CharGen:
         self.art_style = art_style
         self.tracker = tracker
 
-    def run(self, manga_board: Dict[str, Any], session_dir: Path) -> Dict[str, str]:
+    def _build_prompt(self, visual_prompt: str) -> str:
+        width, height = self.resolution
+        return (
+            f"A full-body character portrait for manga. {visual_prompt}. "
+            f"Art style: {self.art_style}. "
+            f"Clean background, professional character sheet style. "
+            f"CRITICAL: {width}:{height} aspect (exact {width}x{height}) resolution."
+        )
+
+    @staticmethod
+    def _extract_inline_image_bytes(response: Any) -> bytes | None:
+        candidates = getattr(response, "candidates", None) or []
+        if not candidates:
+            return None
+        content = getattr(candidates[0], "content", None)
+        parts = getattr(content, "parts", None) or []
+        for part in parts:
+            inline = getattr(part, "inline_data", None)
+            data = getattr(inline, "data", None) if inline else None
+            if data:
+                return data
+        return None
+
+    @staticmethod
+    def _is_valid_generated_image(path: Path) -> bool:
+        try:
+            if not path.exists() or path.stat().st_size < 1024:
+                return False
+            with Image.open(path) as img:
+                rgb = img.convert("RGB")
+                extrema = rgb.getextrema()
+                # Reject near-solid placeholder-like images.
+                if all((mx - mn) < 8 for mn, mx in extrema):
+                    return False
+            return True
+        except Exception:
+            return False
+
+    def run(self, manga_board: Dict[str, Any], session_dir: Path, force_names: Optional[set[str]] = None) -> Dict[str, str]:
         """Generate character portraits. Returns {char_name: image_path}."""
         print("--- Pipeline: Character Generation ---")
         chars_dir = session_dir / "chars"
@@ -51,72 +88,93 @@ class CharGen:
             name = char.get("name", f"char_{i}")
             safe_name = name.replace(" ", "_").lower()
             char_path = chars_dir / f"char_{safe_name}.png"
+            force_regen = bool(force_names and name in force_names)
 
-            # Resume: skip if exists
+            # Resume: skip only if existing image is valid.
             if char_path.exists():
-                print(f"Found existing portrait for {name}, skipping.")
-                manifest[name] = str(char_path)
-                if anchor_path is None:
-                    anchor_path = char_path
-                continue
+                if force_regen:
+                    print(f"Force-regenerating portrait for {name}.")
+                    char_path.unlink(missing_ok=True)
+                else:
+                    if self._is_valid_generated_image(char_path):
+                        print(f"Found existing portrait for {name}, skipping.")
+                        manifest[name] = str(char_path)
+                        if anchor_path is None:
+                            anchor_path = char_path
+                        continue
+                    print(f"Found invalid portrait for {name}, regenerating.")
+                    char_path.unlink(missing_ok=True)
 
             visual_prompt = char.get("visual_prompt", char.get("description", "An anime character"))
-            prompt = (
-                f"A full-body character portrait for manga. "
-                f"{visual_prompt}. "
-                f"Art style: {self.art_style}. "
-                f"Clean background, professional character sheet style. "
-                f"CRITICAL: 16:9, 1280x720 resolution."
-            )
+            prompt = self._build_prompt(visual_prompt)
 
             print(f"Generating portrait ({gen_count + 1}/{self.max_generations}): {name}")
 
-            try:
-                model = get_model(self.image_model_name)
+            generated_ok = False
+            model = get_model(self.image_model_name)
+            max_attempts = 3
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    if anchor_path and anchor_path.exists():
+                        with open(anchor_path, "rb") as f:
+                            anchor_bytes = f.read()
+                        response = tracked_generate(
+                            self.tracker,
+                            model,
+                            [
+                                {"mime_type": "image/png", "data": anchor_bytes},
+                                f"Generate a NEW character in the EXACT same art style. {prompt}",
+                            ],
+                            purpose="char_gen",
+                        )
+                    else:
+                        response = tracked_generate(self.tracker, model, prompt, purpose="char_gen")
 
-                if anchor_path and anchor_path.exists():
-                    with open(anchor_path, "rb") as f:
-                        anchor_bytes = f.read()
-                    response = tracked_generate(
-                        self.tracker, model,
-                        [
-                            {"mime_type": "image/png", "data": anchor_bytes},
-                            f"Generate a NEW character in the EXACT same art style. {prompt}",
-                        ],
-                        purpose="char_gen",
-                    )
-                else:
-                    response = tracked_generate(self.tracker, model, prompt, purpose="char_gen")
+                    image_data = self._extract_inline_image_bytes(response)
+                    if not image_data:
+                        raise ValueError("No image in response")
 
-                image_data = None
-                for part in response.candidates[0].content.parts:
-                    if part.inline_data:
-                        image_data = part.inline_data.data
-                        break
-
-                if image_data:
                     char_path.write_bytes(image_data)
                     self._force_resize(char_path)
+                    if not self._is_valid_generated_image(char_path):
+                        raise ValueError("Generated image failed validation")
+
                     print(f"  ✓ Generated: {char_path.name}")
                     gen_count += 1
-                else:
-                    raise ValueError("No image in response")
+                    generated_ok = True
+                    break
+                except Exception as e:
+                    print(f"  ✗ Attempt {attempt}/{max_attempts} failed for {name}: {e}")
+                    char_path.unlink(missing_ok=True)
 
-            except Exception as e:
-                print(f"  ✗ Failed for {name}: {e}. Creating placeholder.")
-                color = (random.randint(50, 200), random.randint(50, 200), random.randint(50, 200))
-                Image.new("RGB", self.resolution, color=color).save(char_path)
-                gen_count += 1
+            if not generated_ok:
+                raise RuntimeError(f"Character generation failed for '{name}' after {max_attempts} attempts")
 
             manifest[name] = str(char_path)
             if anchor_path is None:
                 anchor_path = char_path
 
+        # Save manifest and anchor metadata for cross-step consistency
         manifest_path = chars_dir / "chars_manifest.json"
         with open(manifest_path, "w") as f:
             json.dump(manifest, f, indent=2)
 
+        anchors = {}
+        for char in characters:
+            name = char.get("name")
+            if name and name in manifest:
+                anchors[name] = {
+                    "image": manifest[name],
+                    "visual_prompt": char.get("visual_prompt", char.get("description", "")),
+                    "style": self.art_style,
+                }
+
+        anchor_path = chars_dir / "char_anchors.json"
+        with open(anchor_path, "w") as f:
+            json.dump(anchors, f, indent=2)
+
         print(f"Character manifest: {len(manifest)} characters ({gen_count} generated)")
+        print(f"Character anchors saved to {anchor_path}")
         return manifest
 
     def _force_resize(self, img_path: Path):

@@ -5,15 +5,17 @@ Reads render_strategy from the manga-board for transitions.
 Composites scene images + text cloud overlays + audio per panel.
 """
 
+import json
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 
 
 class MovieMaker:
-    def __init__(self, fps: int = 24, resolution: Tuple[int, int] = (1280, 720)):
+    def __init__(self, fps: int = 24, resolution: Tuple[int, int] = (1280, 720), enable_music: bool = False):
         self.fps = fps
         self.resolution = resolution
+        self.enable_music = enable_music
 
     def run(
         self,
@@ -131,5 +133,56 @@ class MovieMaker:
             capture_output=True,
         )
 
+        # Optional music layer (expects a pre-generated track from Step 6)
+        if self.enable_music:
+            music_dir = session_dir / "music"
+            music_track = None
+            if music_dir.exists() and music_dir.is_dir():
+                tracks = sorted([p for p in music_dir.iterdir() if p.suffix.lower() in [".mp3", ".wav", ".aac"]])
+                if tracks:
+                    music_track = tracks[0]
+
+            if music_track:
+                final_with_music = session_dir / f"{final_path.stem}_with_music{final_path.suffix}"
+                subprocess.run(
+                    [
+                        "ffmpeg", "-y",
+                        "-i", str(final_path),
+                        "-stream_loop", "-1", "-i", str(music_track),
+                        "-filter_complex", "[1:a]volume=0.15[a2];[0:a][a2]amix=inputs=2:duration=first:dropout_transition=2",
+                        "-c:v", "copy", "-c:a", "aac", "-shortest",
+                        str(final_with_music),
+                    ],
+                    check=False,
+                    capture_output=True,
+                )
+                if final_with_music.exists():
+                    final_path = final_with_music
+            else:
+                print("Music enabled but no track found under session/music; exporting video without music.")
+
+        # generate thumbnail
+        thumb_path = session_dir / "thumbnail.jpg"
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(final_path), "-ss", "00:00:01.000", "-vframes", "1", str(thumb_path)],
+            check=False,
+            capture_output=True,
+        )
+
+        # metadata
+        metadata = {
+            "episode": manga_board.get("episode_number", 1),
+            "title": manga_board.get("episode_title", "NarrativeManga"),
+            "final_video": str(final_path),
+            "thumbnail": str(thumb_path),
+            "resolution": f"{self.resolution[0]}x{self.resolution[1]}",
+            "fps": self.fps,
+            "music_attached": bool(self.enable_music and (session_dir / "music").exists()),
+        }
+        with open(session_dir / "metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2)
+
         print(f"Final video rendered: {final_path}")
+        print(f"Thumbnail saved: {thumb_path}")
+        print(f"Metadata saved: {session_dir / 'metadata.json'}")
         return final_path

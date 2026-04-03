@@ -1,0 +1,17 @@
+{
+  "id": "bundle-font-dejavu-sans-whisper-neon-pop",
+  "name": "Bundle DejaVu Sans Whisper Neon Pop",
+  "font_profile_id": "font-dejavu-sans",
+  "cloud_profile_id": "cloud-whisper-generated",
+  "subtitle_profile_id": "font-dejavu-sans-whisper-neon-pop",
+  "render_profile_id": "render-cinematic-anime-v1",
+  "character_style_profile_id": null,
+  "tags": [
+    "generated",
+    "cloud-text"
+  ],
+  "preview_assets": {
+    "thumbnail": "library/styles/previews/generated/font-dejavu-sans-whisper-neon-pop.png"
+  },
+  "notes": "Auto-generated cloud+text style sample"
+}

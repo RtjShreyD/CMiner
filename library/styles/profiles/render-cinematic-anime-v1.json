@@ -1,0 +1,17 @@
+{
+  "id": "render-cinematic-anime-v1",
+  "name": "Cinematic Anime Render",
+  "category": "render",
+  "version": "v1",
+  "tags": [
+    "anime",
+    "cinematic"
+  ],
+  "status": "active",
+  "preview_assets": {
+    "thumbnail": "library/styles/previews/render-cinematic-anime.png"
+  },
+  "config_json": {
+    "prompt_suffix": "cinematic anime, volumetric light, dramatic composition"
+  }
+}

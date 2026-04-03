@@ -1,0 +1,20 @@
+{
+  "id": "font-roboto-broadcast",
+  "name": "Roboto Broadcast",
+  "category": "font",
+  "version": "v1",
+  "tags": [
+    "broadcast",
+    "subtitle"
+  ],
+  "status": "active",
+  "preview_assets": {
+    "sample_text": "Signal is live and clear.",
+    "thumbnail": "library/styles/previews/font-roboto-broadcast.png"
+  },
+  "config_json": {
+    "family": "Roboto",
+    "weight": 500,
+    "stroke": 1
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "id": "font-dejavu-sans-rectangle-neon-pop",
+  "name": "DejaVu Sans Rectangle Neon Pop",
+  "category": "subtitle",
+  "version": "v1",
+  "tags": [
+    "generated",
+    "cloud-text",
+    "rectangle",
+    "neon-pop"
+  ],
+  "status": "active",
+  "preview_assets": {
+    "thumbnail": "library/styles/previews/generated/font-dejavu-sans-rectangle-neon-pop.png",
+    "sample_text": "The city whispered: run now."
+  },
+  "config_json": {
+    "font_family": "DejaVu Sans",
+    "font_file": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "cloud_kind": "rectangle",
+    "text_style": "neon-pop",
+    "stroke_width": 3,
+    "font_size": 56
+  }
+}

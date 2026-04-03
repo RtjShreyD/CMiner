@@ -2,6 +2,59 @@
 
 CMiner is a powerful multi-agent framework designed for high-quality automated content generation. It currently features specialized agents for cinematic podcasting and automated news analysis.
 
+![WebStudio Demo](demo.png)
+
+## ✅ Feature Coverage (Current)
+
+This repository now supports a production-grade, session-aware, step-wise AI media workflow with both CLI and WebStudio control.
+
+### WebStudio + API orchestration
+- Step-wise execution with live logs over WebSocket (`planner`, `chars`, `scenes`, `audio`, `texts/clouds`, `music`, `video`, `all`).
+- Existing/new session workflows with automatic state hydration from `session_state.json`.
+- Session lock controls per step and backend sync of both locks and settings.
+- Session explorer refresh tools for generated files and artifacts.
+- Run/redo controls for each stage with reset toggles.
+- Model-aware controls in UI and API payload propagation.
+
+### NarrativeManga pipeline
+- Episode planning with continuity context and strict JSON storyboard generation.
+- Character portrait generation with validation/retry hardening.
+- Scene generation anchored to character references.
+- TTS generation for panel dialogue.
+- Dynamic subtitle/cloud overlay rendering modes including subtitle-only behavior.
+- Dedicated Step 6 music generation and Step 7 final video rendering.
+
+### Music generation (Step 6)
+- Provider switching in UI/API/CLI:
+  - `strudel`
+  - `lyria`
+- Strudel workflow with detailed console diagnostics (`status/start/play` visibility).
+- Lyria workflow via Gemini API music models (`lyria-3-clip-preview`, `lyria-3-pro-preview`).
+- Provider/model persisted to session settings and replayed on existing sessions.
+
+### Hash checkpoints + rollback
+- Per-step workflow hashes exposed through checkpoint APIs.
+- Automatic hash history snapshot capture after successful runs.
+- Restore to previous hash for each step from UI dropdown.
+- API endpoints for hash history listing and hash-based restore.
+- History-aware state refresh in UI after run/redo/restore operations.
+
+### Character workflows
+- Planner-derived editable character prompts exposed in UI.
+- Per-character regeneration (single-char redo) without rerunning full char step.
+- Single-char redo console stdout/stderr returned and shown in terminal pane.
+- LLM usage tracking updates include redo flows.
+
+### Reliability + quality improvements
+- Hardened image generation to avoid placeholder/yellow/invalid outputs.
+- Legacy multimodal payload compatibility normalization for image parts.
+- Better synchronization of session metadata and step configuration.
+
+### Outputs and metadata
+- Session-scoped outputs in `outputs/<session_id>/narrativeManga`.
+- Final video metadata and thumbnails generated with movie output.
+- Music assets and planning files persisted under `music/`.
+
 ## 🚀 Quick Start
 
 ### 1. Prerequisites
@@ -13,17 +66,18 @@ CMiner is a powerful multi-agent framework designed for high-quality automated c
   ```
 
 ### 2. Setup Environment
-Clone the repository and initialize the virtual environment:
+Clone the repository and initialize the conda environment:
 
 ```bash
-# Create virtual environment
-python3 -m venv .venv
+# Create environment (one-time)
+conda create -n py_lts python=3.11 -y
 
-# Activate environment
-source .venv/bin/activate
+# Install dependencies into py_lts
+conda run -n py_lts pip install -r requirements.txt
 
-# Install dependencies
-pip install -r requirements.txt
+# Run commands in py_lts
+conda run -n py_lts python main.py --help
+
 ```
 
 ### 3. API Configuration
@@ -93,6 +147,15 @@ Similar to the Podcasting agent, NarrativeManga can be run step-by-step:
 - `audio`: TTS with synchronized word timing.
 - `clouds`: Dynamic speech bubble placement (OpenCV).
 - `video`: Final FFmpeg assembly.
+
+#### ✨ New narrativeManga features (in this branch)
+- Theme preset support (`--theme`) for narrative templates (scary stories, mystery, slice-of-life).
+- Art style presets (`--preset`) and multi-output format presets (`--format`, including tiktok/instagram/youtube specs).
+- Configuration in `agents/narrativeManga/config.json` for themes, art_styles, output_presets, and voice pools.
+- UI form with theme/art/format options in `web-studio/src/pages/Agents.jsx`.
+- `MovieMaker` now supports optional music mixing (`--enable_music`) and auto metadata/thumbnail generation.
+- Anchor metadata support in char generation (`char_anchors.json`) for better scene consistency.
+- Session instrumentation in `session_state.json` includes settings and run metadata.
 
 > [!IMPORTANT]
 > **Character Consistency**: This agent uses multimodal anchoring. Portraits generated in the `chars` step are used as references for all subsequent `scenes`, ensuring characters look the same across the entire series.

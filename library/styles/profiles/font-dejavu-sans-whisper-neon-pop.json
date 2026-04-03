@@ -1,0 +1,25 @@
+{
+  "id": "font-dejavu-sans-whisper-neon-pop",
+  "name": "DejaVu Sans Whisper Neon Pop",
+  "category": "subtitle",
+  "version": "v1",
+  "tags": [
+    "generated",
+    "cloud-text",
+    "whisper",
+    "neon-pop"
+  ],
+  "status": "active",
+  "preview_assets": {
+    "thumbnail": "library/styles/previews/generated/font-dejavu-sans-whisper-neon-pop.png",
+    "sample_text": "The city whispered: run now."
+  },
+  "config_json": {
+    "font_family": "DejaVu Sans",
+    "font_file": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "cloud_kind": "whisper",
+    "text_style": "neon-pop",
+    "stroke_width": 3,
+    "font_size": 56
+  }
+}

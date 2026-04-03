@@ -5,16 +5,16 @@ They define how to build and evolve features safely and consistently.
 
 ## 1) Environment and Execution
 
-	- `/home/rtj/Krsna/CMiner/.venv/bin/python`
-	- `/home/rtj/Krsna/CMiner/.venv/bin/pip`
+	- `conda run -n py_lts python`
+	- `conda run -n py_lts pip`
 # Developer Instructions (CMiner)
 
 These instructions define how contributors and coding agents should build features in this workspace.
 
 ## 1) Environment
 
-- Always use `/home/rtj/Krsna/CMiner/.venv/bin/python`.
-- Always use `/home/rtj/Krsna/CMiner/.venv/bin/pip`.
+- Always use `conda run -n py_lts python`.
+- Always use `conda run -n py_lts pip`.
 - Do not rely on global Python packages.
 
 ## 2) Workspace Architecture

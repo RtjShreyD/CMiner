@@ -18,7 +18,7 @@ def main():
     parser.add_argument("--prompt", help="Override base prompt (otherwise reads prompt.txt)")
     parser.add_argument(
         "--step",
-        choices=["all", "planner", "chars", "scenes", "audio", "clouds", "video"],
+        choices=["all", "planner", "chars", "scenes", "audio", "clouds", "music", "video"],
         default="all",
         help="Execute a specific pipeline step",
     )
@@ -28,6 +28,42 @@ def main():
         choices=["new", "continue"],
         default="new",
         help="'new' starts a fresh series. 'continue' plans the next episode from prior context.",
+    )
+    parser.add_argument("--theme", help="Theme key from config themes")
+    parser.add_argument("--preset", help="Style preset key from config art_styles")
+    parser.add_argument("--format", choices=["tiktok","instagram_reels","youtube_shorts","youtube_widescreen"], help="Output format preset")
+    parser.add_argument("--vector_upscale", action="store_true", help="Apply upscale stub after image generation")
+    parser.add_argument("--enable_music", action="store_true", help="Include background music in final video")
+    parser.add_argument("--max_image_requests", type=int, help="Maximum total image requests")
+    parser.add_argument("--max_chars_per_episode", type=int, help="Maximum characters in one episode")
+    parser.add_argument("--max_panels_per_episode", type=int, help="Maximum panel count in one episode")
+    parser.add_argument("--max_episode_duration_mins", type=int, help="Maximum episode duration minutes")
+    parser.add_argument("--resolution_w", type=int, help="Override output resolution width")
+    parser.add_argument("--resolution_h", type=int, help="Override output resolution height")
+    parser.add_argument("--cloud_style", help="Cloud style id from buildpack")
+    parser.add_argument("--font_style", help="Font style id from buildpack")
+    parser.add_argument("--subtitle_style", help="Subtitle style id from buildpack")
+    parser.add_argument("--narration_mode", help="Narration mode from buildpack")
+    parser.add_argument("--subtitle_scale", type=float, help="Subtitle scale from buildpack")
+    parser.add_argument("--planner_model", help="Override planner model name")
+    parser.add_argument("--character_image_model", help="Override character image model name")
+    parser.add_argument("--scene_image_model", help="Override scene image model name")
+    parser.add_argument(
+        "--music_provider",
+        choices=["strudel", "lyria"],
+        default="strudel",
+        help="Music generation provider for Step 6",
+    )
+    parser.add_argument(
+        "--lyria_model",
+        default="lyria-3-clip-preview",
+        help="Lyria model id when --music_provider=lyria",
+    )
+    parser.add_argument(
+        "--episode_mode",
+        choices=["true", "false"],
+        default="true",
+        help="true allows multi-episode continuity, false forces single-video mode",
     )
     parser.add_argument(
         "--develop",
@@ -66,22 +102,54 @@ def main():
     max_chars = models_config.get("max_chars_per_episode", 5)
     max_panels = models_config.get("max_panels_per_episode", 15)
     max_duration = models_config.get("max_episode_duration_mins", 5)
+
+    if args.max_image_requests:
+        max_image_requests = args.max_image_requests
+    if args.max_chars_per_episode:
+        max_chars = args.max_chars_per_episode
+    if args.max_panels_per_episode:
+        max_panels = args.max_panels_per_episode
+    if args.max_episode_duration_mins:
+        max_duration = args.max_episode_duration_mins
+    if args.planner_model:
+        planner_model = args.planner_model
+    if args.character_image_model:
+        char_image_model = args.character_image_model
+    if args.scene_image_model:
+        scene_image_model = args.scene_image_model
     tts_voices_pool = config.get("tts_voices_pool", {})
+
+    # Style/theme presets
+    themes = config.get("themes", {})
+    art_styles = config.get("art_styles", {})
+    output_presets = config.get("output_presets", {})
+    resolved_theme = themes.get(args.theme, args.theme) if args.theme else None
+
+    base_prompt = args.prompt or ""
+    if args.theme and args.theme in themes and not base_prompt:
+        base_prompt = themes[args.theme]
+
+    if args.preset and args.preset in art_styles:
+        art_style = art_styles[args.preset]
+    else:
+        art_style = config.get("art_style", "cinematic anime")
+
     video_config = config.get("video", {})
     resolution = tuple(video_config.get("resolution", [1280, 720]))
     fps = video_config.get("fps", 8)
     target_duration = video_config.get("target_duration_mins", 5)
-    art_style = config.get("art_style", "cinematic anime")
 
-    # ── State Management ──────────────────────────────────────
-    state_path = session_dir / "session_state.json"
-    state = _load_state(state_path)
+    if args.format and args.format in output_presets:
+        preset_cfg = output_presets[args.format]
+        resolution = tuple(preset_cfg.get("resolution", list(resolution)))
+        fps = preset_cfg.get("fps", fps)
+        target_duration = preset_cfg.get("duration_mins", target_duration)
+    if args.resolution_w and args.resolution_h:
+        resolution = (args.resolution_w, args.resolution_h)
 
-    print(f"Session: {session_dir}")
-    print(f"Config: fps={fps}, max_image_requests={max_image_requests}, max_chars={max_chars}")
+    enable_music = args.enable_music
+    vector_upscale = args.vector_upscale
 
-    # ── Resolve Base Prompt ───────────────────────────────────
-    base_prompt = args.prompt
     if not base_prompt:
         prompt_file = Path(__file__).resolve().parent / "prompt.txt"
         if prompt_file.exists():
@@ -89,6 +157,42 @@ def main():
             print(f"Loaded base prompt from {prompt_file}")
         else:
             base_prompt = "A dramatic manga story."
+
+    # ── State Management ──────────────────────────────────────
+    state_path = session_dir / "session_state.json"
+    state = _load_state(state_path)
+
+    state.setdefault("settings", {}).update({
+        "prompt": base_prompt,
+        "episodes_mode": args.episodes,
+        "episode": args.episode,
+        "theme": args.theme,
+        "preset": args.preset,
+        "format": args.format,
+        "planner_model": planner_model,
+        "character_image_model": char_image_model,
+        "scene_image_model": scene_image_model,
+        "resolution": list(resolution),
+        "fps": fps,
+        "enable_music": enable_music,
+        "music_provider": args.music_provider,
+        "lyria_model": args.lyria_model,
+        "vector_upscale": vector_upscale,
+        "max_image_requests": max_image_requests,
+        "max_chars_per_episode": max_chars,
+        "max_panels_per_episode": max_panels,
+        "max_episode_duration_mins": max_duration,
+        "cloud_style": args.cloud_style or "cloud-none",
+        "font_style": args.font_style or "font-geist-sans",
+        "subtitle_style": args.subtitle_style or "sub-clean-bottom",
+        "narration_mode": args.narration_mode or "hybrid_subtitles_clouds",
+        "subtitle_scale": args.subtitle_scale if args.subtitle_scale is not None else 1.0,
+        "episode_mode": args.episode_mode == "true",
+    })
+    _save_state(state_path, state)
+
+    print(f"Session: {session_dir}")
+    print(f"Config: fps={fps}, max_image_requests={max_image_requests}, max_chars={max_chars}")
 
     # ── Determine what to run ─────────────────────────────────
     # --episodes continue: plan-only by default
@@ -110,6 +214,9 @@ def main():
             max_chars=max_chars,
             max_panels=max_panels,
             art_style=art_style,
+            theme=resolved_theme,
+            episode_mode=(args.episode_mode == "true"),
+            target_episode=args.episode,
             tracker=tracker,
         )
         manga_board = planner.run(base_prompt, session_dir)
@@ -192,7 +299,7 @@ def main():
     if args.step in ["all", "audio"] or (run_generation and not run_specific_step):
         from agents.narrativeManga.chains.tts_gen import TTSGen
 
-        tts_gen = TTSGen()
+        tts_gen = TTSGen(voices_pool=tts_voices_pool)
         audio_files = tts_gen.run(manga_board, session_dir)
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["audio_generated"] = True
         _save_state(state_path, state)
@@ -206,12 +313,40 @@ def main():
     if args.step in ["all", "clouds"] or (run_generation and not run_specific_step):
         from agents.narrativeManga.chains.cloud_gen import CloudGen
 
-        cloud_gen = CloudGen(fps=fps, resolution=resolution)
+        settings = state.get("settings", {})
+        cloud_gen = CloudGen(
+            fps=fps,
+            resolution=resolution,
+            cloud_style=settings.get("cloud_style", "cloud-none"),
+            font_style=settings.get("font_style", "font-geist-sans"),
+            subtitle_style=settings.get("subtitle_style", "sub-clean-bottom"),
+            narration_mode=settings.get("narration_mode", "hybrid_subtitles_clouds"),
+            subtitle_scale=float(settings.get("subtitle_scale", 1.0) or 1.0),
+        )
         cloud_gen.run(manga_board, session_dir)
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["clouds_generated"] = True
         _save_state(state_path, state)
 
-    # ── 6. Movie Maker ────────────────────────────────────────
+    # ── 6. Music Generation (optional) ───────────────────────
+    if args.step in ["all", "music"] or (run_generation and not run_specific_step):
+        if enable_music:
+            from agents.narrativeManga.chains.music_gen import MusicGen
+
+            music_gen = MusicGen(
+                model_name=planner_model,
+                music_provider=args.music_provider,
+                lyria_model=args.lyria_model,
+                tracker=tracker,
+            )
+            music_path = music_gen.run(manga_board, session_dir, base_prompt=base_prompt)
+            state.setdefault("episodes", {}).setdefault(str(ep_num), {})["music_generated"] = bool(music_path)
+            _save_state(state_path, state)
+        else:
+            print("Music step skipped because music is disabled (--enable_music not set).")
+            state.setdefault("episodes", {}).setdefault(str(ep_num), {})["music_generated"] = False
+            _save_state(state_path, state)
+
+    # ── 7. Movie Maker ────────────────────────────────────────
     if args.step in ["all", "video"] or (run_generation and not run_specific_step):
         from agents.narrativeManga.chains.moviemaker import MovieMaker
 
@@ -224,11 +359,15 @@ def main():
                 + [str(p) for p in audio_dir.glob("panel_*.wav")]
             )
 
-        maker = MovieMaker(fps=fps, resolution=resolution)
+        maker = MovieMaker(fps=fps, resolution=resolution, enable_music=enable_music)
         final_video = maker.run(manga_board, scenes_manifest, audio_files, session_dir)
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["status"] = "complete"
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["video"] = str(final_video)
         _save_state(state_path, state)
+
+        if vector_upscale:
+            print("Vector upscale requested, stub behavior: upscaling is not yet implemented.")
+
         print(f"Task Complete. Final Output: {final_video}")
     elif run_specific_step:
         print(f"Step '{args.step}' complete in {session_dir}")

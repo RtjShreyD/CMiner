@@ -1,0 +1,18 @@
+{
+  "id": "cloud-fluffy-default",
+  "name": "Fluffy Speech Cloud",
+  "category": "cloud",
+  "version": "v1",
+  "tags": [
+    "speech",
+    "friendly"
+  ],
+  "status": "active",
+  "preview_assets": {
+    "thumbnail": "library/styles/previews/cloud-fluffy.png"
+  },
+  "config_json": {
+    "shape": "soft-round",
+    "tail": "speech"
+  }
+}

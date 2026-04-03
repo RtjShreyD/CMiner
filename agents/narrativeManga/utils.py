@@ -1,18 +1,10 @@
 import os
 import random
 from pathlib import Path
-import google.generativeai as genai
-from dotenv import load_dotenv
+from agents.shared.gemini_compat import get_model as _get_model
 
-# Load environment variables
-load_dotenv()
-
-# Configure Gemini
+# Keep env read for backwards compatibility with existing modules.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY not found in environment.")
-
-genai.configure(api_key=GEMINI_API_KEY)
 
 
 def _new_session_id() -> str:
@@ -34,5 +26,5 @@ def ensure_session_outputs(base_dir: Path) -> Path:
 
 
 def get_model(model_name: str):
-    """Return a Gemini GenerativeModel instance."""
-    return genai.GenerativeModel(model_name)
+    """Return a Gemini model adapter backed by google.genai."""
+    return _get_model(model_name, required_key=False)

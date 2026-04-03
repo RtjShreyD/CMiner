@@ -1,0 +1,25 @@
+{
+  "id": "font-dejavu-sans-speech_round-comic-bold",
+  "name": "DejaVu Sans Speech Round Comic Bold",
+  "category": "subtitle",
+  "version": "v1",
+  "tags": [
+    "generated",
+    "cloud-text",
+    "speech_round",
+    "comic-bold"
+  ],
+  "status": "active",
+  "preview_assets": {
+    "thumbnail": "library/styles/previews/generated/font-dejavu-sans-speech_round-comic-bold.png",
+    "sample_text": "The city whispered: run now."
+  },
+  "config_json": {
+    "font_family": "DejaVu Sans",
+    "font_file": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "cloud_kind": "speech_round",
+    "text_style": "comic-bold",
+    "stroke_width": 4,
+    "font_size": 60
+  }
+}
