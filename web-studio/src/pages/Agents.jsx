@@ -16,6 +16,17 @@ const EXECUTION_AGENT_BY_UI_AGENT = {
   autoAnimator: 'narrativeManga',
 };
 const VALID_AGENT_IDS = new Set(AGENTS_LIST.map((a) => a.id));
+const AUTOANIMATOR_TEMPLATE_SESSION = '1392763/narrativeManga';
+const DEFAULT_SECTION_LOCKS = {
+  step0: true,
+  planner: true,
+  chars: true,
+  scenes: true,
+  audio: true,
+  texts: true,
+  music: true,
+  video: true,
+};
 
 function stylePreviewBackground(cloudStyle) {
   if (cloudStyle?.includes('storm') || cloudStyle?.includes('neo')) {
@@ -132,14 +143,7 @@ export default function Agents() {
   const [charRedoBusy, setCharRedoBusy] = useState('');
   const [toasts, setToasts] = useState([]);
   const [sectionLocks, setSectionLocks] = useState({
-    step0: false,
-    planner: false,
-    chars: false,
-    scenes: false,
-    audio: false,
-    texts: false,
-    music: false,
-    video: false,
+    ...DEFAULT_SECTION_LOCKS,
   });
 
   const ws = useRef(null);
@@ -152,6 +156,23 @@ export default function Agents() {
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 3200);
+  };
+
+  const autoRunMissingFields = () => {
+    const missing = [];
+    if (sessionMode === 'existing' && !sessionPath) {
+      missing.push('Step 0: existing session selection');
+    }
+    if (sessionMode === 'new') {
+      if (!buildpackResolution) missing.push('Step 0: resolution');
+      if (!buildpackFontStyle) missing.push('Step 0: font style');
+      if (!buildpackSubtitleStyle) missing.push('Step 0: subtitle style');
+      if (!buildpackCloudStyle) missing.push('Step 0: cloud style');
+    }
+    if (!narrativePrompt || !narrativePrompt.trim()) missing.push('Step 1: narrative prompt');
+    if (!preset) missing.push('Step 1: art style');
+    if (!plannerModel) missing.push('Step 1: planner model');
+    return missing;
   };
 
   const goToAgentWorkspace = (agent, mode, path = '') => {
@@ -167,6 +188,14 @@ export default function Agents() {
   };
 
   const startAgent = async (agentName) => {
+    const missing = autoRunMissingFields();
+    if (missing.length > 0) {
+      const msg = `Auto run blocked. Fill required fields: ${missing.join(', ')}`;
+      setLogs((prev) => [...prev, { type: 'error', msg }]);
+      pushToast('error', 'Fill Step 0 and Step 1 required fields first.');
+      return;
+    }
+
     try {
       setRunning(true);
       setLogs((prev) => [...prev, { type: 'system', msg: `Running full pipeline via ${agentName}...` }]);
@@ -206,6 +235,36 @@ export default function Agents() {
     }
   };
 
+  const applyTemplateSettings = (settings = {}) => {
+    if (typeof settings?.prompt === 'string' && settings.prompt.trim()) setNarrativePrompt(settings.prompt);
+    if (typeof settings?.preset === 'string' && settings.preset.trim()) setPreset(settings.preset);
+    if (typeof settings?.format === 'string' && settings.format.trim()) setFormat(settings.format);
+    if (typeof settings?.planner_model === 'string' && settings.planner_model.trim()) setPlannerModel(settings.planner_model);
+    if (typeof settings?.character_image_model === 'string' && settings.character_image_model.trim()) setCharsModel(settings.character_image_model);
+    if (typeof settings?.scene_image_model === 'string' && settings.scene_image_model.trim()) setScenesModel(settings.scene_image_model);
+    if (typeof settings?.max_image_requests === 'number') setMaxImageRequests(settings.max_image_requests);
+    if (typeof settings?.max_chars_per_episode === 'number') setMaxCharsPerEpisode(settings.max_chars_per_episode);
+    if (typeof settings?.max_panels_per_episode === 'number') setMaxPanelsPerEpisode(settings.max_panels_per_episode);
+    if (typeof settings?.max_episode_duration_mins === 'number') setMaxEpisodeDurationMins(settings.max_episode_duration_mins);
+    if (typeof settings?.cloud_style === 'string' && settings.cloud_style.trim()) setBuildpackCloudStyle(settings.cloud_style);
+    if (typeof settings?.font_style === 'string' && settings.font_style.trim()) setBuildpackFontStyle(settings.font_style);
+    if (typeof settings?.subtitle_style === 'string' && settings.subtitle_style.trim()) setBuildpackSubtitleStyle(settings.subtitle_style);
+    if (typeof settings?.subtitle_scale === 'number') setSubtitleScale(settings.subtitle_scale);
+    if (typeof settings?.enable_music === 'boolean') setEnableMusic(settings.enable_music);
+    if (typeof settings?.music_provider === 'string' && settings.music_provider.trim()) setMusicProvider(settings.music_provider);
+    if (typeof settings?.lyria_model === 'string' && settings.lyria_model.trim()) setLyriaModel(settings.lyria_model);
+    if (typeof settings?.episodes_mode === 'string' && settings.episodes_mode.trim()) setEpisodesMode(settings.episodes_mode);
+    if (typeof settings?.episode_mode === 'boolean') setEpisodeMode(settings.episode_mode);
+
+    const resolution = Array.isArray(settings?.resolution) ? settings.resolution : [];
+    if (resolution.length === 2) {
+      const [w, h] = resolution;
+      if (w === 1920 && h === 1080) setBuildpackResolution('youtube_video');
+      else if (w === 1080 && h === 1920) setBuildpackResolution('youtube_shorts');
+      else if (w === 1080 && h === 1080) setBuildpackResolution('insta_posts');
+    }
+  };
+
   const normalizeHistoryRows = (step) => {
     const rows = workflowHistory?.[step];
     return Array.isArray(rows) ? rows : [];
@@ -226,11 +285,14 @@ export default function Agents() {
       });
       if (res.data?.hashes) setWorkflowHashes(res.data.hashes);
       if (res.data?.history) setWorkflowHistory(res.data.history);
-      setSelectedHistoryHash((prev) => ({ ...prev, [step]: res.data?.hash || hash }));
+      const currentHash = res.data?.hashes?.[step] || res.data?.hash || hash;
+      setSelectedHistoryHash((prev) => ({ ...prev, [step]: currentHash }));
+      // Pull a fresh server snapshot so dropdown state is immediately consistent.
+      await refreshWorkflowHashes(sessionPath);
       setTreeRefreshToken((prev) => prev + 1);
-      setLogs((prev) => [...prev, { type: 'success', msg: `Restored ${step} to hash ${hash}` }]);
-      pushToast('success', `Restored ${step} to ${hash}`);
-      setBuildpackSaveMessage(`Restored ${step} to hash ${hash}`);
+      setLogs((prev) => [...prev, { type: 'success', msg: `Restored ${step} to hash ${currentHash}` }]);
+      pushToast('success', `Restored ${step} to ${currentHash}`);
+      setBuildpackSaveMessage(`Restored ${step} to hash ${currentHash}`);
     } catch (e) {
       pushToast('error', `Failed to restore ${step}.`);
       setLogs((prev) => [...prev, { type: 'error', msg: `Restore failed for ${step}: ${e.message}` }]);
@@ -600,9 +662,28 @@ export default function Agents() {
       setWorkflowHashes({});
       setWorkflowHistory({});
       setSelectedHistoryHash({});
-      setSectionLocks({ step0: false, planner: false, chars: false, scenes: false, audio: false, texts: false, music: false, video: false });
+      setSectionLocks({ ...DEFAULT_SECTION_LOCKS });
     }
   }, [sessionPath]);
+
+  useEffect(() => {
+    const loadTemplateDefaultsForNewSession = async () => {
+      if (page !== 'workspace' || sessionMode !== 'new' || sessionPath) return;
+      try {
+        const res = await axios.get(`${API_BASE}/sessions/file`, {
+          params: { path: `${AUTOANIMATOR_TEMPLATE_SESSION}/session_state.json` },
+        });
+        const raw = res.data?.content || '{}';
+        const parsed = JSON.parse(raw);
+        const settings = parsed?.settings || {};
+        applyTemplateSettings(settings);
+        setSectionLocks({ ...DEFAULT_SECTION_LOCKS });
+      } catch {
+        // Keep built-in defaults if template session is unavailable.
+      }
+    };
+    loadTemplateDefaultsForNewSession();
+  }, [page, sessionMode, sessionPath]);
 
   useEffect(() => {
     const keys = ['planner', 'chars', 'scenes', 'audio', 'texts', 'music', 'video'];
@@ -696,9 +777,9 @@ export default function Agents() {
       try {
         const res = await axios.get(`${API_BASE}/agents/narrative/locks`, { params: { session_path: sessionPath } });
         const incoming = res.data?.locks || {};
-        setSectionLocks((prev) => ({ ...prev, ...incoming }));
+        setSectionLocks((prev) => ({ ...DEFAULT_SECTION_LOCKS, ...prev, ...incoming }));
       } catch {
-        setSectionLocks((prev) => ({ ...prev }));
+        setSectionLocks((prev) => ({ ...DEFAULT_SECTION_LOCKS, ...prev }));
       }
     };
     loadLocks();
@@ -842,9 +923,9 @@ export default function Agents() {
           chars: Array.isArray(byTask?.chars) ? byTask.chars : [],
           scenes: Array.isArray(byTask?.scenes) ? byTask.scenes : [],
         });
-        if (defaults?.planner_model) setPlannerModel(defaults.planner_model);
-        if (defaults?.character_image_model) setCharsModel(defaults.character_image_model);
-        if (defaults?.scene_image_model) setScenesModel(defaults.scene_image_model);
+        setPlannerModel((prev) => prev || defaults?.planner_model || prev);
+        setCharsModel((prev) => prev || defaults?.character_image_model || prev);
+        setScenesModel((prev) => prev || defaults?.scene_image_model || prev);
       } catch {
         setAvailableModelsByTask({ planner: [], chars: [], scenes: [] });
       }
@@ -1629,7 +1710,6 @@ export default function Agents() {
               </label>
               <button className="btn" type="button" onClick={() => runNarrativeStep('video')} disabled={stepBusy === 'video'}>{stepBusy === 'video' ? 'Running...' : 'Run Video'}</button>
               <button className="btn" type="button" title="Redo Video" onClick={() => runNarrativeStep('video', { redo: true })} disabled={stepBusy === 'video' || stepBusy === 'all'}><RotateCcw size={14} /></button>
-              <button className="btn" type="button" onClick={() => runNarrativeStep('all')} disabled={stepBusy === 'all'}>{stepBusy === 'all' ? 'Running...' : 'Run End-to-End'}</button>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.video || 'n/a'}</span>
               {renderHashHistoryControls('video')}
             </div>
@@ -1876,7 +1956,12 @@ export default function Agents() {
           </details>
           )}
 
-          <button className="btn btn-primary" style={{ marginTop: '1rem', width: '100%' }} onClick={() => startAgent(selectedAgent)} disabled={running}>
+          <div style={{ marginTop: '0.9rem', color: 'var(--text-muted)', fontSize: '0.8rem', lineHeight: 1.35 }}>
+            NOTE: Clicking <strong>Run AutoAnimator</strong> runs full end-to-end with preloaded default settings.
+            To customize defaults, unlock at least Step 0 and Step 1 using the lock icons, edit values,
+            then run step-by-step or use auto mode.
+          </div>
+          <button className="btn btn-primary" style={{ marginTop: '0.65rem', width: '100%' }} onClick={() => startAgent(selectedAgent)} disabled={running}>
             {running ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />} Run {AGENTS_LIST.find((a) => a.id === selectedAgent)?.name}
           </button>
         </section>
