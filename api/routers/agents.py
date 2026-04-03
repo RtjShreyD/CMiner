@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import uuid
+from datetime import datetime, timezone
 from contextlib import redirect_stdout, redirect_stderr
 from queue import Empty, Queue
 from pathlib import Path
@@ -24,6 +25,9 @@ OUTPUTS_DIR = ROOT_DIR / "outputs"
 NARRATIVE_RUNNER = ROOT_DIR / "agents" / "narrativeManga" / "run.py"
 NARRATIVE_JOBS: dict[str, dict[str, Any]] = {}
 NARRATIVE_JOBS_LOCK = threading.Lock()
+STEP_HISTORY_STEPS = ("planner", "chars", "scenes", "audio", "texts", "music", "video")
+HASH_HISTORY_FILE = "workflow_hash_history.json"
+HASH_HISTORY_DIR = ".workflow_hash_snapshots"
 
 
 def _python_bin() -> str:
@@ -306,6 +310,136 @@ def _workflow_hashes(session_dir: Path) -> dict[str, str | None]:
     }
 
 
+def _hash_history_file(session_dir: Path) -> Path:
+    return session_dir / HASH_HISTORY_FILE
+
+
+def _hash_snapshot_root(session_dir: Path) -> Path:
+    return session_dir / HASH_HISTORY_DIR
+
+
+def _load_hash_history(session_dir: Path) -> dict[str, list[dict[str, Any]]]:
+    path = _hash_history_file(session_dir)
+    if not path.exists():
+        return {k: [] for k in STEP_HISTORY_STEPS}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {k: [] for k in STEP_HISTORY_STEPS}
+        out: dict[str, list[dict[str, Any]]] = {}
+        for step in STEP_HISTORY_STEPS:
+            rows = data.get(step, [])
+            out[step] = rows if isinstance(rows, list) else []
+        return out
+    except Exception:
+        return {k: [] for k in STEP_HISTORY_STEPS}
+
+
+def _save_hash_history(session_dir: Path, history: dict[str, list[dict[str, Any]]]) -> None:
+    path = _hash_history_file(session_dir)
+    path.write_text(json.dumps(history, indent=2), encoding="utf-8")
+
+
+def _snapshot_step_files(session_dir: Path, step: str, step_hash: str) -> Path | None:
+    files = _collect_step_files(session_dir, step)
+    if not files:
+        return None
+
+    snapshot_dir = _hash_snapshot_root(session_dir) / step / step_hash
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    for src in files:
+        rel = src.relative_to(session_dir)
+        dest = snapshot_dir / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+    return snapshot_dir
+
+
+def _record_step_hash_history(session_dir: Path, step: str) -> dict[str, Any] | None:
+    if step not in STEP_HISTORY_STEPS:
+        return None
+
+    step_hash = _step_hash(session_dir, step)
+    if not step_hash:
+        return None
+
+    history = _load_hash_history(session_dir)
+    rows = history.get(step, [])
+    if rows and str(rows[0].get("hash")) == step_hash:
+        return rows[0]
+
+    snapshot_dir = _snapshot_step_files(session_dir, step, step_hash)
+    if snapshot_dir is None:
+        return None
+
+    entry = {
+        "hash": step_hash,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "snapshot": str(snapshot_dir.relative_to(session_dir)),
+    }
+    rows.insert(0, entry)
+    history[step] = rows[:20]
+    _save_hash_history(session_dir, history)
+    return entry
+
+
+def _record_hash_history_for_run(session_dir: Path, step: str) -> dict[str, list[dict[str, Any]]]:
+    if step == "all":
+        for s in STEP_HISTORY_STEPS:
+            _record_step_hash_history(session_dir, s)
+    elif step in STEP_HISTORY_STEPS:
+        _record_step_hash_history(session_dir, step)
+    elif step == "clouds":
+        _record_step_hash_history(session_dir, "texts")
+    return _load_hash_history(session_dir)
+
+
+def _history_payload(session_dir: Path) -> dict[str, list[dict[str, Any]]]:
+    history = _load_hash_history(session_dir)
+    out: dict[str, list[dict[str, Any]]] = {}
+    for step in STEP_HISTORY_STEPS:
+        entries = history.get(step, [])
+        out[step] = [
+            {
+                "hash": str(e.get("hash", "")),
+                "timestamp": str(e.get("timestamp", "")),
+            }
+            for e in entries
+            if e.get("hash")
+        ]
+    return out
+
+
+def _restore_step_from_hash(session_dir: Path, step: str, hash_value: str) -> None:
+    history = _load_hash_history(session_dir)
+    rows = history.get(step, [])
+    entry = next((r for r in rows if str(r.get("hash")) == hash_value), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Hash '{hash_value}' not found for step '{step}'")
+
+    snapshot_rel = str(entry.get("snapshot", "")).strip()
+    if not snapshot_rel:
+        raise HTTPException(status_code=500, detail="History entry is missing snapshot path")
+
+    snapshot_dir = (session_dir / snapshot_rel).resolve()
+    if not str(snapshot_dir).startswith(str(session_dir.resolve())) or not snapshot_dir.exists():
+        raise HTTPException(status_code=404, detail="Snapshot data not found for selected hash")
+
+    cleanup_paths = _step_reset_paths(session_dir, step)
+    if step == "planner":
+        cleanup_paths = [session_dir / "episodes"]
+    for p in cleanup_paths:
+        _delete_path(p)
+
+    for src in snapshot_dir.rglob("*"):
+        if not src.is_file():
+            continue
+        rel = src.relative_to(snapshot_dir)
+        dest = session_dir / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+
+
 def _job_state(job_id: str) -> dict[str, Any] | None:
     with NARRATIVE_JOBS_LOCK:
         return NARRATIVE_JOBS.get(job_id)
@@ -400,11 +534,18 @@ def _run_narrative_step_worker(job_id: str, req: Any, step: str, res: tuple[int,
     t_err.join(timeout=2)
 
     hashes = None
+    history = None
     if detected_session_path:
         try:
-            hashes = _workflow_hashes(_resolve_session_dir(detected_session_path))
+            session_dir = _resolve_session_dir(detected_session_path)
+            hashes = _workflow_hashes(session_dir)
+            if exit_code == 0:
+                history = _record_hash_history_for_run(session_dir, step)
+            else:
+                history = _history_payload(session_dir)
         except Exception:
             hashes = None
+            history = None
 
     result = {
         "status": "success" if exit_code == 0 else "error",
@@ -414,6 +555,7 @@ def _run_narrative_step_worker(job_id: str, req: Any, step: str, res: tuple[int,
         "stdout": "\n".join(stdout_lines),
         "stderr": "\n".join(stderr_lines),
         "hashes": hashes,
+        "history": history,
     }
     state["result"] = result
     state["done"] = True
@@ -499,6 +641,12 @@ class RedoSingleCharRequest(BaseModel):
     episode: int | None = None
     visual_prompt: str | None = None
     chars_model: str | None = None
+
+
+class RestoreHashRequest(BaseModel):
+    session_path: str
+    step: str = Field(pattern="^(planner|chars|scenes|audio|texts|music|video)$")
+    hash: str
 
 
 def _latest_episode_num(session_dir: Path) -> int | None:
@@ -952,6 +1100,39 @@ async def narrative_checkpoints(session_path: str) -> dict[str, Any]:
     return {
         "session_path": session_path,
         "hashes": _workflow_hashes(session_dir),
+        "history": _history_payload(session_dir),
+    }
+
+
+@router.get("/narrative/hash-history")
+async def narrative_hash_history(session_path: str) -> dict[str, Any]:
+    session_dir = _resolve_session_dir(session_path)
+    return {
+        "session_path": session_path,
+        "history": _history_payload(session_dir),
+    }
+
+
+@router.post("/narrative/revert-hash")
+async def narrative_revert_hash(req: RestoreHashRequest) -> dict[str, Any]:
+    session_dir = _resolve_session_dir(req.session_path)
+
+    # Persist the current step state before rollback so users can move forward/backward.
+    _record_step_hash_history(session_dir, req.step)
+
+    _restore_step_from_hash(session_dir, req.step, req.hash)
+    # Promote restored state as the latest current entry in history.
+    _record_step_hash_history(session_dir, req.step)
+
+    hashes = _workflow_hashes(session_dir)
+    history = _history_payload(session_dir)
+    return {
+        "ok": True,
+        "session_path": req.session_path,
+        "step": req.step,
+        "hash": req.hash,
+        "hashes": hashes,
+        "history": history,
     }
 
 
@@ -1024,11 +1205,18 @@ async def narrative_run_step(req: RunNarrativeStepRequest) -> dict[str, Any]:
     )
 
     hashes = None
+    history = None
     if run.get("session_path"):
         try:
-            hashes = _workflow_hashes(_resolve_session_dir(run["session_path"]))
+            session_dir = _resolve_session_dir(run["session_path"])
+            hashes = _workflow_hashes(session_dir)
+            if run["exit_code"] == 0:
+                history = _record_hash_history_for_run(session_dir, step)
+            else:
+                history = _history_payload(session_dir)
         except Exception:
             hashes = None
+            history = None
 
     return {
         "status": "success" if run["exit_code"] == 0 else "error",
@@ -1038,6 +1226,7 @@ async def narrative_run_step(req: RunNarrativeStepRequest) -> dict[str, Any]:
         "stdout": run["stdout"],
         "stderr": run["stderr"],
         "hashes": hashes,
+        "history": history,
     }
 
 
@@ -1195,6 +1384,11 @@ async def narrative_redo_single_char(req: RedoSingleCharRequest) -> dict[str, An
     except Exception:
         hashes = None
 
+    try:
+        history = _record_hash_history_for_run(session_dir, "chars")
+    except Exception:
+        history = _history_payload(session_dir)
+
     if tracker is not None and tracker.calls:
         tracker.save(session_dir)
 
@@ -1204,6 +1398,7 @@ async def narrative_redo_single_char(req: RedoSingleCharRequest) -> dict[str, An
         "char_name": req.char_name,
         "image_path": out,
         "hashes": hashes,
+        "history": history,
         "stdout": stdout_buf.getvalue(),
         "stderr": stderr_buf.getvalue(),
         "llm_calls_recorded": len(tracker.calls) if tracker is not None else 0,

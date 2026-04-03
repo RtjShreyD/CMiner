@@ -114,6 +114,9 @@ export default function Agents() {
   const [savingLayout, setSavingLayout] = useState(false);
   const [buildpackSaveMessage, setBuildpackSaveMessage] = useState('');
   const [workflowHashes, setWorkflowHashes] = useState({});
+  const [workflowHistory, setWorkflowHistory] = useState({});
+  const [selectedHistoryHash, setSelectedHistoryHash] = useState({});
+  const [hashRevertBusy, setHashRevertBusy] = useState('');
   const [stepBusy, setStepBusy] = useState('');
   const [stepReset, setStepReset] = useState({ planner: false, chars: false, scenes: false, audio: false, texts: false, music: false, video: false });
   const [episodesMode, setEpisodesMode] = useState('new');
@@ -190,13 +193,50 @@ export default function Agents() {
   const refreshWorkflowHashes = async (path) => {
     if (!path) {
       setWorkflowHashes({});
+      setWorkflowHistory({});
       return;
     }
     try {
       const res = await axios.get(`${API_BASE}/agents/narrative/checkpoints`, { params: { session_path: path } });
       setWorkflowHashes(res.data?.hashes || {});
+      setWorkflowHistory(res.data?.history || {});
     } catch {
       setWorkflowHashes({});
+      setWorkflowHistory({});
+    }
+  };
+
+  const normalizeHistoryRows = (step) => {
+    const rows = workflowHistory?.[step];
+    return Array.isArray(rows) ? rows : [];
+  };
+
+  const revertToStepHash = async (step) => {
+    if (!sessionPath) return;
+    const hash = selectedHistoryHash?.[step];
+    if (!hash) return;
+
+    setHashRevertBusy(step);
+    setBuildpackSaveMessage('');
+    try {
+      const res = await axios.post(`${API_BASE}/agents/narrative/revert-hash`, {
+        session_path: sessionPath,
+        step,
+        hash,
+      });
+      if (res.data?.hashes) setWorkflowHashes(res.data.hashes);
+      if (res.data?.history) setWorkflowHistory(res.data.history);
+      setSelectedHistoryHash((prev) => ({ ...prev, [step]: res.data?.hash || hash }));
+      setTreeRefreshToken((prev) => prev + 1);
+      setLogs((prev) => [...prev, { type: 'success', msg: `Restored ${step} to hash ${hash}` }]);
+      pushToast('success', `Restored ${step} to ${hash}`);
+      setBuildpackSaveMessage(`Restored ${step} to hash ${hash}`);
+    } catch (e) {
+      pushToast('error', `Failed to restore ${step}.`);
+      setLogs((prev) => [...prev, { type: 'error', msg: `Restore failed for ${step}: ${e.message}` }]);
+      setBuildpackSaveMessage(`Restore failed for ${step}: ${e.message}`);
+    } finally {
+      setHashRevertBusy('');
     }
   };
 
@@ -353,6 +393,9 @@ export default function Agents() {
         setWorkflowHashes(finalRes.hashes);
       } else if (nextPath) {
         await refreshWorkflowHashes(nextPath);
+      }
+      if (finalRes?.history) {
+        setWorkflowHistory(finalRes.history);
       }
 
       const status = finalRes?.status || 'success';
@@ -555,9 +598,32 @@ export default function Agents() {
       refreshWorkflowHashes(sessionPath);
     } else {
       setWorkflowHashes({});
+      setWorkflowHistory({});
+      setSelectedHistoryHash({});
       setSectionLocks({ step0: false, planner: false, chars: false, scenes: false, audio: false, texts: false, music: false, video: false });
     }
   }, [sessionPath]);
+
+  useEffect(() => {
+    const keys = ['planner', 'chars', 'scenes', 'audio', 'texts', 'music', 'video'];
+    setSelectedHistoryHash((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      keys.forEach((k) => {
+        const rows = Array.isArray(workflowHistory?.[k]) ? workflowHistory[k] : [];
+        if (!rows.length) return;
+        const currentHash = workflowHashes?.[k] || '';
+        const preferred = currentHash && rows.some((r) => r?.hash === currentHash)
+          ? currentHash
+          : (rows[0]?.hash || '');
+        if (next[k] !== preferred) {
+          next[k] = preferred;
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [workflowHistory, workflowHashes]);
 
   useEffect(() => {
     const loadSavedPrompt = async () => {
@@ -907,6 +973,35 @@ export default function Agents() {
     ? sourceCharOptions.filter((item) => (item.path || '').split('/')[1] === sourceCharSession)
     : sourceCharOptions;
 
+  const renderHashHistoryControls = (step) => {
+    const rows = normalizeHistoryRows(step);
+    if (!rows.length) return null;
+
+    return (
+      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+        <select
+          value={selectedHistoryHash?.[step] || ''}
+          onChange={(e) => setSelectedHistoryHash((prev) => ({ ...prev, [step]: e.target.value }))}
+          style={{ maxWidth: 260 }}
+        >
+          {rows.map((entry) => (
+            <option key={`${step}-${entry.hash}-${entry.timestamp}`} value={entry.hash}>
+              {entry.hash} | {entry.timestamp?.replace('T', ' ').slice(0, 19) || 'unknown'}
+            </option>
+          ))}
+        </select>
+        <button
+          className="btn"
+          type="button"
+          onClick={() => revertToStepHash(step)}
+          disabled={hashRevertBusy === step || !selectedHistoryHash?.[step]}
+        >
+          {hashRevertBusy === step ? 'Restoring...' : 'Restore'}
+        </button>
+      </div>
+    );
+  };
+
   useEffect(() => {
     if (!sourceCharSession && sourceCharSessions.length > 0) {
       setSourceCharSession(sourceCharSessions[0]);
@@ -1239,6 +1334,7 @@ export default function Agents() {
               <button className="btn" type="button" onClick={() => runNarrativeStep('planner')} disabled={stepBusy === 'planner'}>{stepBusy === 'planner' ? 'Running...' : 'Run Planner'}</button>
               <button className="btn" type="button" title="Redo Planner" onClick={() => runNarrativeStep('planner', { redo: true })} disabled={stepBusy === 'planner' || stepBusy === 'all'}><RotateCcw size={14} /></button>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.planner || 'n/a'}</span>
+              {renderHashHistoryControls('planner')}
             </div>
             </fieldset>
           </details>
@@ -1345,6 +1441,7 @@ export default function Agents() {
               <button className="btn" type="button" onClick={() => runNarrativeStep('chars')} disabled={stepBusy === 'chars'}>{stepBusy === 'chars' ? 'Running...' : 'Run Chars'}</button>
               <button className="btn" type="button" title="Redo Chars" onClick={() => runNarrativeStep('chars', { redo: true })} disabled={stepBusy === 'chars' || stepBusy === 'all'}><RotateCcw size={14} /></button>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.chars || 'n/a'}</span>
+              {renderHashHistoryControls('chars')}
             </div>
             </fieldset>
           </details>
@@ -1375,6 +1472,7 @@ export default function Agents() {
               <button className="btn" type="button" onClick={() => runNarrativeStep('scenes')} disabled={stepBusy === 'scenes'}>{stepBusy === 'scenes' ? 'Running...' : 'Run Scenes'}</button>
               <button className="btn" type="button" title="Redo Scenes" onClick={() => runNarrativeStep('scenes', { redo: true })} disabled={stepBusy === 'scenes' || stepBusy === 'all'}><RotateCcw size={14} /></button>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.scenes || 'n/a'}</span>
+              {renderHashHistoryControls('scenes')}
             </div>
             </fieldset>
           </details>
@@ -1396,6 +1494,7 @@ export default function Agents() {
               <button className="btn" type="button" onClick={() => runNarrativeStep('audio')} disabled={stepBusy === 'audio'}>{stepBusy === 'audio' ? 'Running...' : 'Run Audio'}</button>
               <button className="btn" type="button" title="Redo Audio" onClick={() => runNarrativeStep('audio', { redo: true })} disabled={stepBusy === 'audio' || stepBusy === 'all'}><RotateCcw size={14} /></button>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.audio || 'n/a'}</span>
+              {renderHashHistoryControls('audio')}
             </div>
             </fieldset>
           </details>
@@ -1456,6 +1555,7 @@ export default function Agents() {
               <button className="btn" type="button" onClick={() => runNarrativeStep('texts')} disabled={stepBusy === 'texts'}>{stepBusy === 'texts' ? 'Running...' : 'Run Texts'}</button>
               <button className="btn" type="button" title="Redo Texts" onClick={() => runNarrativeStep('texts', { redo: true })} disabled={stepBusy === 'texts' || stepBusy === 'all'}><RotateCcw size={14} /></button>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.texts || 'n/a'}</span>
+              {renderHashHistoryControls('texts')}
             </div>
             </fieldset>
           </details>
@@ -1499,6 +1599,7 @@ export default function Agents() {
               <button className="btn" type="button" onClick={() => runNarrativeStep('music')} disabled={stepBusy === 'music'}>{stepBusy === 'music' ? 'Running...' : 'Run Music'}</button>
               <button className="btn" type="button" title="Redo Music" onClick={() => runNarrativeStep('music', { redo: true })} disabled={stepBusy === 'music' || stepBusy === 'all'}><RotateCcw size={14} /></button>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.music || 'n/a'}</span>
+              {renderHashHistoryControls('music')}
             </div>
             </fieldset>
           </details>
@@ -1530,6 +1631,7 @@ export default function Agents() {
               <button className="btn" type="button" title="Redo Video" onClick={() => runNarrativeStep('video', { redo: true })} disabled={stepBusy === 'video' || stepBusy === 'all'}><RotateCcw size={14} /></button>
               <button className="btn" type="button" onClick={() => runNarrativeStep('all')} disabled={stepBusy === 'all'}>{stepBusy === 'all' ? 'Running...' : 'Run End-to-End'}</button>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.video || 'n/a'}</span>
+              {renderHashHistoryControls('video')}
             </div>
             </fieldset>
           </details>
