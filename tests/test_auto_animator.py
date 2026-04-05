@@ -41,6 +41,7 @@ sys.modules["google.genai.types"] = genai_types
 sys.modules["dotenv"] = dotenv
 
 from agents.autoAnimator.chains.episode_planner import EpisodePlanner
+from agents.autoAnimator import run as auto_run
 
 
 class FakeModel:
@@ -102,3 +103,35 @@ class EpisodePlannerTests(unittest.TestCase):
             ep_dir = tmp_path / "episodes" / "episode1"
             self.assertTrue(ep_dir.exists())
             self.assertTrue((ep_dir / "manga-board.json").exists())
+
+    def test_episode_planner_expands_panels_to_target_budget(self):
+        with tempfile.TemporaryDirectory() as td:
+            tmp_path = Path(td)
+            planner = EpisodePlanner(
+                theme="mystery_adventure",
+                art_style="cinematic anime",
+                max_duration_mins=1,
+                max_panels=20,
+            )
+
+            with mock.patch("agents.autoAnimator.chains.episode_planner.get_model", return_value=FakeModel()):
+                with mock.patch("agents.autoAnimator.chains.episode_planner.tracked_generate", side_effect=lambda tracker, model, prompt, purpose=None: FakeModel().generate_content(None)):
+                    board = planner.run("short baseline", tmp_path)
+
+            self.assertEqual(len(board.get("panels", [])), 20)
+
+
+class ProjectNameSelectionTests(unittest.TestCase):
+    def test_unspecified_project_name_detection(self):
+        self.assertTrue(auto_run._is_unspecified_project_name("AutoAnimator Project"))
+        self.assertTrue(auto_run._is_unspecified_project_name("untitled"))
+        self.assertFalse(auto_run._is_unspecified_project_name("Prompt Tank Prime"))
+
+    def test_auto_assign_project_name_fallback_without_prompt(self):
+        name = auto_run._auto_assign_project_name(
+            model_name="models/gemini-flash-latest",
+            seed_prompt="",
+            niche_key="stage_show",
+            tracker=auto_run.LLMTracker(),
+        )
+        self.assertTrue(isinstance(name, str) and len(name.strip()) > 0)

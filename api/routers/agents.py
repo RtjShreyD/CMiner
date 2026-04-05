@@ -1,9 +1,11 @@
 import asyncio
 import json
 import hashlib
+import os
 import random
 import shutil
 import io
+import signal
 import subprocess
 import sys
 import threading
@@ -14,10 +16,12 @@ from queue import Empty, Queue
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form
 from pydantic import BaseModel, Field
 from agents.shared.gemini_compat import make_gemini_client
-from agents.shared.llm_tracker import LLMTracker
+from agents.shared.llm_tracker import LLMTracker, tracked_generate
+from agents.autoAnimator.utils import ensure_session_outputs
+from agents.autoAnimator.utils import get_model
 
 router = APIRouter()
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -63,16 +67,17 @@ def _to_rel_session_path(session_dir: Path) -> str:
 
 
 def _extract_session_path_from_stdout(stdout: str) -> str | None:
+    markers = ["Active session directory:", "New session directory:"]
     for line in stdout.splitlines():
-        marker = "New session directory:"
-        if marker in line:
-            abs_path = line.split(marker, 1)[1].strip()
-            p = Path(abs_path)
-            if p.exists():
-                try:
-                    return str(p.resolve().relative_to(OUTPUTS_DIR.resolve()))
-                except Exception:
-                    return None
+        for marker in markers:
+            if marker in line:
+                abs_path = line.split(marker, 1)[1].strip()
+                p = Path(abs_path)
+                if p.exists():
+                    try:
+                        return str(p.resolve().relative_to(OUTPUTS_DIR.resolve()))
+                    except Exception:
+                        return None
     return None
 
 
@@ -80,6 +85,7 @@ def _build_narrative_cmd(
     *,
     step: str,
     prompt: str | None,
+    preset_prompt: str | None = None,
     session_path: str | None,
     episodes: str = "new",
     develop: bool = False,
@@ -103,8 +109,14 @@ def _build_narrative_cmd(
     planner_model: str | None = None,
     chars_model: str | None = None,
     scenes_model: str | None = None,
+    tts_provider: str | None = None,
+    gemini_tts_model: str | None = None,
     music_provider: str | None = None,
     lyria_model: str | None = None,
+    project_name: str | None = None,
+    niche: str | None = None,
+    start_frame_path: str | None = None,
+    end_frame_path: str | None = None,
 ) -> list[str]:
     cmd = [
         _python_bin(),
@@ -117,6 +129,12 @@ def _build_narrative_cmd(
     ]
     if prompt:
         cmd.extend(["--prompt", prompt])
+    if preset_prompt:
+        cmd.extend(["--preset_prompt", preset_prompt])
+    if project_name:
+        cmd.extend(["--project_name", project_name])
+    if niche:
+        cmd.extend(["--niche", niche])
     if session_path:
         cmd.extend(["--session", str(OUTPUTS_DIR / session_path)])
     if episodes == "continue":
@@ -160,10 +178,18 @@ def _build_narrative_cmd(
         cmd.extend(["--character_image_model", chars_model])
     if scenes_model:
         cmd.extend(["--scene_image_model", scenes_model])
+    if tts_provider:
+        cmd.extend(["--tts_provider", tts_provider])
+    if gemini_tts_model:
+        cmd.extend(["--gemini_tts_model", gemini_tts_model])
     if music_provider:
         cmd.extend(["--music_provider", music_provider])
     if lyria_model:
         cmd.extend(["--lyria_model", lyria_model])
+    if start_frame_path:
+        cmd.extend(["--start_frame_path", start_frame_path])
+    if end_frame_path:
+        cmd.extend(["--end_frame_path", end_frame_path])
     return cmd
 
 
@@ -171,6 +197,9 @@ def _run_narrative_step(
     *,
     step: str,
     prompt: str | None,
+    preset_prompt: str | None = None,
+    project_name: str | None = None,
+    niche: str | None = None,
     session_path: str | None,
     episodes: str = "new",
     develop: bool = False,
@@ -194,12 +223,19 @@ def _run_narrative_step(
     planner_model: str | None = None,
     chars_model: str | None = None,
     scenes_model: str | None = None,
+    tts_provider: str | None = None,
+    gemini_tts_model: str | None = None,
     music_provider: str | None = None,
     lyria_model: str | None = None,
+    start_frame_path: str | None = None,
+    end_frame_path: str | None = None,
 ) -> dict[str, Any]:
     cmd = _build_narrative_cmd(
         step=step,
         prompt=prompt,
+        preset_prompt=preset_prompt,
+        project_name=project_name,
+        niche=niche,
         session_path=session_path,
         episodes=episodes,
         develop=develop,
@@ -214,6 +250,7 @@ def _run_narrative_step(
         max_episode_duration_mins=max_episode_duration_mins,
         resolution_w=resolution_w,
         resolution_h=resolution_h,
+        cloud_style=cloud_style,
         font_style=font_style,
         subtitle_style=subtitle_style,
         narration_mode=narration_mode,
@@ -222,8 +259,12 @@ def _run_narrative_step(
         planner_model=planner_model,
         chars_model=chars_model,
         scenes_model=scenes_model,
+        tts_provider=tts_provider,
+        gemini_tts_model=gemini_tts_model,
         music_provider=music_provider,
         lyria_model=lyria_model,
+        start_frame_path=start_frame_path,
+        end_frame_path=end_frame_path,
     )
 
     proc = subprocess.run(cmd, cwd=str(ROOT_DIR), capture_output=True, text=True, check=False)
@@ -232,7 +273,7 @@ def _run_narrative_step(
         "exit_code": proc.returncode,
         "stdout": proc.stdout,
         "stderr": proc.stderr,
-        "session_path": session_path or detected_session_path,
+        "session_path": detected_session_path or session_path,
     }
 
 
@@ -242,18 +283,27 @@ def _step_reset_paths(session_dir: Path, step: str) -> list[Path]:
         "chars": [session_dir / "chars"],
         "scenes": [session_dir / "scenes"],
         "audio": [session_dir / "audio"],
-        "texts": [session_dir / "overlays"],
-        "clouds": [session_dir / "overlays"],
+        "texts": [session_dir / "overlays", session_dir / "overlays_youtube_shorts"],
+        "clouds": [session_dir / "overlays", session_dir / "overlays_youtube_shorts"],
         "music": [session_dir / "music"],
-        "video": [session_dir / "frames", session_dir / "concat.txt", session_dir / "thumbnail.jpg"],
+        "video": [
+            session_dir / "frames",
+            session_dir / "fullvideo",
+            session_dir / "shorts",
+            session_dir / "concat.txt",
+            session_dir / "thumbnail.jpg",
+        ],
         "all": [
             session_dir / "episodes",
             session_dir / "chars",
             session_dir / "scenes",
             session_dir / "audio",
             session_dir / "overlays",
+            session_dir / "overlays_youtube_shorts",
             session_dir / "music",
             session_dir / "frames",
+            session_dir / "fullvideo",
+            session_dir / "shorts",
             session_dir / "concat.txt",
             session_dir / "thumbnail.jpg",
         ],
@@ -278,7 +328,10 @@ def _collect_step_files(session_dir: Path, step: str) -> list[Path]:
     if step == "audio":
         return sorted(list((session_dir / "audio").glob("panel_*.*")))
     if step == "texts":
-        return sorted(list((session_dir / "overlays").glob("**/*.png")))
+        return sorted(
+            list((session_dir / "overlays").glob("**/*.png"))
+            + list((session_dir / "overlays_youtube_shorts").glob("**/*.png"))
+        )
     if step == "music":
         return sorted(
             list((session_dir / "music").glob("*.mp3"))
@@ -293,6 +346,12 @@ def _collect_step_files(session_dir: Path, step: str) -> list[Path]:
             + list(session_dir.glob("seg_*.mp4"))
             + list(session_dir.glob("thumbnail.jpg"))
             + list(session_dir.glob("metadata.json"))
+            + list((session_dir / "fullvideo").glob("**/*.mp4"))
+            + list((session_dir / "fullvideo").glob("**/*.jpg"))
+            + list((session_dir / "fullvideo").glob("**/*.json"))
+            + list((session_dir / "shorts").glob("**/*.mp4"))
+            + list((session_dir / "shorts").glob("**/*.jpg"))
+            + list((session_dir / "shorts").glob("**/*.json"))
         )
     return []
 
@@ -458,7 +517,7 @@ def _job_state(job_id: str) -> dict[str, Any] | None:
 
 
 def _create_job(job_id: str) -> dict[str, Any]:
-    state = {"queue": Queue(), "done": False, "result": None}
+    state = {"queue": Queue(), "done": False, "result": None, "proc": None, "aborted": False}
     with NARRATIVE_JOBS_LOCK:
         NARRATIVE_JOBS[job_id] = state
     return state
@@ -475,6 +534,9 @@ def _run_narrative_step_worker(job_id: str, req: Any, step: str, res: tuple[int,
     cmd = _build_narrative_cmd(
         step=step,
         prompt=req.prompt,
+        preset_prompt=req.preset_prompt,
+        project_name=req.project_name,
+        niche=req.niche,
         session_path=req.session_path if req.session_mode == "existing" else req.session_path,
         episodes=req.episodes,
         develop=req.develop,
@@ -498,8 +560,12 @@ def _run_narrative_step_worker(job_id: str, req: Any, step: str, res: tuple[int,
         planner_model=req.planner_model,
         chars_model=req.chars_model,
         scenes_model=req.scenes_model,
+        tts_provider=req.tts_provider,
+        gemini_tts_model=req.gemini_tts_model,
         music_provider=req.music_provider,
         lyria_model=req.lyria_model,
+        start_frame_path=req.start_frame_path,
+        end_frame_path=req.end_frame_path,
     )
 
     proc = subprocess.Popen(
@@ -509,7 +575,9 @@ def _run_narrative_step_worker(job_id: str, req: Any, step: str, res: tuple[int,
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
+        start_new_session=True,
     )
+    state["proc"] = proc
 
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
@@ -562,7 +630,7 @@ def _run_narrative_step_worker(job_id: str, req: Any, step: str, res: tuple[int,
             history = None
 
     result = {
-        "status": "success" if exit_code == 0 else "error",
+        "status": "aborted" if state.get("aborted") else ("success" if exit_code == 0 else "error"),
         "exit_code": exit_code,
         "step": req.step,
         "session_path": detected_session_path,
@@ -571,14 +639,17 @@ def _run_narrative_step_worker(job_id: str, req: Any, step: str, res: tuple[int,
         "hashes": hashes,
         "history": history,
     }
+    state["proc"] = None
     state["result"] = result
     state["done"] = True
-    q.put({"type": "success" if exit_code == 0 else "error", "msg": f"Step '{req.step}' finished with status {result['status']}."})
+    msg_type = "success" if result["status"] == "success" else "error"
+    q.put({"type": msg_type, "msg": f"Step '{req.step}' finished with status {result['status']}."})
 
 class RunAgentRequest(BaseModel):
     agent_name: str
     cmd_args: str | None = None
     prompt: str | None = None
+    preset_prompt: str | None = None
     theme: str | None = None
     preset: str | None = None
     format: str | None = None
@@ -587,8 +658,10 @@ class RunAgentRequest(BaseModel):
     session_mode: str = "new"
     session_path: str | None = None
     enable_music: bool = False
-    music_provider: str = "strudel"
+    music_provider: str = "lyria"
     lyria_model: str = "lyria-3-clip-preview"
+    tts_provider: str = "edge"
+    gemini_tts_model: str = "models/gemini-2.5-flash-tts"
     narration_mode: str | None = None
     character_pack_id: str | None = None
     reuse_session_chars: bool = False
@@ -598,6 +671,10 @@ class RunAgentRequest(BaseModel):
     max_chars_per_episode: int | None = None
     max_panels_per_episode: int | None = None
     max_episode_duration_mins: int | None = None
+    project_name: str | None = None
+    niche: str | None = None
+    start_frame_path: str | None = None
+    end_frame_path: str | None = None
 
 
 class RunNarrativeStepRequest(BaseModel):
@@ -607,6 +684,7 @@ class RunNarrativeStepRequest(BaseModel):
     reset: bool = False
     redo: bool = False
     prompt: str | None = None
+    preset_prompt: str | None = None
     episodes: str = "new"
     develop: bool = False
     episode: int | None = None
@@ -628,9 +706,15 @@ class RunNarrativeStepRequest(BaseModel):
     planner_model: str | None = None
     chars_model: str | None = None
     scenes_model: str | None = None
+    tts_provider: str | None = None
+    gemini_tts_model: str | None = None
     music_provider: str | None = None
     lyria_model: str | None = None
     chars_visual_overrides: dict[str, str] | None = None
+    project_name: str | None = None
+    niche: str | None = None
+    start_frame_path: str | None = None
+    end_frame_path: str | None = None
 
 
 class CopyCharacterRequest(BaseModel):
@@ -649,6 +733,10 @@ class SessionStateSyncRequest(BaseModel):
     locks: dict[str, bool] = Field(default_factory=dict)
 
 
+class BootstrapSessionRequest(BaseModel):
+    project_name: str | None = None
+
+
 class RedoSingleCharRequest(BaseModel):
     session_path: str
     char_name: str
@@ -661,6 +749,13 @@ class RestoreHashRequest(BaseModel):
     session_path: str
     step: str = Field(pattern="^(planner|chars|scenes|audio|texts|music|video)$")
     hash: str
+
+
+class MaterializePresetPromptRequest(BaseModel):
+    session_path: str
+    base_prompt: str | None = None
+    project_name: str | None = None
+    niche: str | None = None
 
 
 def _latest_episode_num(session_dir: Path) -> int | None:
@@ -684,6 +779,74 @@ def _latest_episode_num(session_dir: Path) -> int | None:
             except Exception:
                 continue
     return max(nums) if nums else None
+
+
+def _parse_json_object(raw: str) -> dict[str, Any]:
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return {}
+    try:
+        parsed = json.loads(raw[start : end + 1])
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _fallback_series_preset_prompt(seed_prompt: str, project_name: str, niche_key: str | None) -> str:
+    niche_label = niche_key or "general_series"
+    return (
+        "SERIES SOURCE OF TRUTH (PERSISTENT PRESET)\n"
+        f"PROJECT: {project_name}\n"
+        f"NICHE: {niche_label}\n"
+        "MODE: episodic show/series continuity\n\n"
+        "BASELINE SETUP (authoritative foundation):\n"
+        f"{seed_prompt}\n\n"
+        "SERIES RULES:\n"
+        "- Keep continuity of world setup, recurring cast logic, and tone across episodes.\n"
+        "- Preserve baseline constraints unless the user explicitly requests a change.\n"
+        "- New episode prompts are additive directions, not baseline replacement.\n"
+        "- Reuse established characters and visual identity unless add/remove is requested.\n"
+    )
+
+
+def _compute_series_preset_prompt(
+    *,
+    planner_model: str,
+    seed_prompt: str,
+    project_name: str,
+    niche_key: str | None,
+) -> str:
+    fallback = _fallback_series_preset_prompt(seed_prompt, project_name, niche_key)
+    if not seed_prompt.strip():
+        return fallback
+
+    try:
+        model = get_model(planner_model)
+        niche_label = niche_key or "general_series"
+        prompt = (
+            "You are creating a persistent SERIES PRESET PROMPT for episodic continuity.\n"
+            "This preset is computed once from the first narrative prompt and reused across future episodes.\n"
+            "Return ONLY strict JSON with key: preset_prompt.\n"
+            "Rules:\n"
+            "- Keep it concise, practical, and production-ready (120-220 words).\n"
+            "- Extract immutable series foundations: world, recurring cast intent, tone, stakes.\n"
+            "- Include continuity rules for future add-on prompts.\n"
+            "- Do NOT copy the user prompt verbatim. Distill and normalize it.\n"
+            "- Do NOT include markdown fences.\n\n"
+            f"PROJECT_NAME: {project_name}\n"
+            f"NICHE: {niche_label}\n"
+            f"FIRST_USER_NARRATIVE_PROMPT:\n{seed_prompt}\n\n"
+            "JSON shape:\n"
+            "{\"preset_prompt\": \"...\"}"
+        )
+        tracker = LLMTracker()
+        response = tracked_generate(tracker, model, prompt, purpose="series_preset_builder_api")
+        obj = _parse_json_object(getattr(response, "text", "") or "")
+        preset = str(obj.get("preset_prompt", "")).strip() if isinstance(obj.get("preset_prompt"), str) else ""
+        return preset or fallback
+    except Exception:
+        return fallback
 
 
 def _apply_redo_behavior(req: RunNarrativeStepRequest) -> None:
@@ -1004,12 +1167,32 @@ async def autoanimator_planner_options() -> dict[str, Any]:
     cfg = _load_autoanimator_config()
     themes = cfg.get("themes", {}) if isinstance(cfg.get("themes", {}), dict) else {}
     art_styles = cfg.get("art_styles", {}) if isinstance(cfg.get("art_styles", {}), dict) else {}
+    niches = cfg.get("niche_bundles", {}) if isinstance(cfg.get("niche_bundles", {}), dict) else {}
+    models_cfg = cfg.get("models", {}) if isinstance(cfg.get("models", {}), dict) else {}
+    tts_provider_default = str(models_cfg.get("tts_provider", "edge") or "edge")
+    gemini_tts_default = str(models_cfg.get("gemini_tts_model", "models/gemini-2.5-flash-tts") or "models/gemini-2.5-flash-tts")
+    max_image_requests_default = int(models_cfg.get("max_image_requests", 50) or 50)
+    max_chars_default = int(models_cfg.get("max_chars_per_episode", 3) or 3)
+    max_panels_default = int(models_cfg.get("max_panels_per_episode", 50) or 50)
+    max_duration_default = int(models_cfg.get("max_episode_duration_mins", 1) or 1)
     return {
         "themes": themes,
         "art_styles": art_styles,
+        "niches": niches,
+        "tts": {
+            "providers": ["edge", "gemini"],
+            "gemini_models": ["models/gemini-2.5-flash-tts", "models/gemini-2.5-pro-tts"],
+        },
         "defaults": {
             "theme": "auto-select",
             "preset": "auto-select",
+            "niche": "auto-select",
+            "tts_provider": tts_provider_default,
+            "gemini_tts_model": gemini_tts_default,
+            "max_image_requests": max_image_requests_default,
+            "max_chars_per_episode": max_chars_default,
+            "max_panels_per_episode": max_panels_default,
+            "max_episode_duration_mins": max_duration_default,
         },
     }
 
@@ -1073,7 +1256,19 @@ async def narrative_sync_session_state(req: SessionStateSyncRequest) -> dict[str
     existing_settings = current.get("settings") if isinstance(current.get("settings"), dict) else {}
     existing_locks = current.get("locks") if isinstance(current.get("locks"), dict) else {}
 
-    next_settings = {**existing_settings, **(req.settings or {})}
+    incoming_settings = dict(req.settings or {})
+
+    # Preserve previously stored values when frontend sends blank placeholders.
+    # This prevents accidental prompt loss during mode/session transitions.
+    for key in ("prompt", "preset_prompt", "project_name"):
+        if key in incoming_settings:
+            val = incoming_settings.get(key)
+            if val is None:
+                incoming_settings.pop(key, None)
+            elif isinstance(val, str) and not val.strip():
+                incoming_settings.pop(key, None)
+
+    next_settings = {**existing_settings, **incoming_settings}
     next_locks = {**existing_locks, **(req.locks or {})}
 
     current["settings"] = next_settings
@@ -1090,6 +1285,113 @@ async def narrative_sync_session_state(req: SessionStateSyncRequest) -> dict[str
         "locks": next_locks,
     }
 
+
+@router.post("/autoanimator/materialize-preset-prompt")
+async def narrative_materialize_preset_prompt(req: MaterializePresetPromptRequest) -> dict[str, Any]:
+    session_dir = _resolve_session_dir(req.session_path)
+    state_path = session_dir / "session_state.json"
+
+    current: dict[str, Any] = {}
+    if state_path.exists():
+        try:
+            current = json.loads(state_path.read_text(encoding="utf-8"))
+            if not isinstance(current, dict):
+                current = {}
+        except Exception:
+            current = {}
+
+    settings = current.get("settings") if isinstance(current.get("settings"), dict) else {}
+    existing_preset = str(settings.get("preset_prompt", "") or "").strip()
+    if existing_preset:
+        return {
+            "ok": True,
+            "session_path": req.session_path,
+            "preset_prompt": existing_preset,
+            "materialized": False,
+        }
+
+    config = _load_autoanimator_config()
+    models_cfg = config.get("models", {}) if isinstance(config.get("models", {}), dict) else {}
+    planner_model = str(settings.get("planner_model", "") or models_cfg.get("planner_model", "models/gemini-flash-latest"))
+
+    seed_prompt = str(req.base_prompt or settings.get("prompt", "") or "").strip()
+    if not seed_prompt:
+        prompt_file = ROOT_DIR / "agents" / "autoAnimator" / "prompt.txt"
+        if prompt_file.exists():
+            try:
+                seed_prompt = prompt_file.read_text(encoding="utf-8").strip()
+            except Exception:
+                seed_prompt = "A dramatic manga story."
+        else:
+            seed_prompt = "A dramatic manga story."
+
+    project_name = str(req.project_name or settings.get("project_name", "") or "AutoAnimator")
+    niche_key = str(req.niche or settings.get("niche", "") or "").strip() or None
+
+    preset_prompt = _compute_series_preset_prompt(
+        planner_model=planner_model,
+        seed_prompt=seed_prompt,
+        project_name=project_name,
+        niche_key=niche_key,
+    )
+
+    settings["preset_prompt"] = preset_prompt
+    settings["episode_mode"] = True
+    current["settings"] = settings
+    state_path.write_text(json.dumps(current, indent=2), encoding="utf-8")
+
+    return {
+        "ok": True,
+        "session_path": req.session_path,
+        "preset_prompt": preset_prompt,
+        "materialized": True,
+    }
+
+
+@router.post("/autoanimator/bootstrap-session")
+async def narrative_bootstrap_session(req: BootstrapSessionRequest | None = None) -> dict[str, Any]:
+    session_dir = ensure_session_outputs(ROOT_DIR, project_name=(req.project_name if req else None))
+    rel = _to_rel_session_path(session_dir)
+    sid = rel.split("/")[0] if rel else ""
+    return {
+        "ok": True,
+        "session_path": rel,
+        "session_id": sid,
+    }
+
+
+@router.post("/autoanimator/upload-reference-frame")
+async def narrative_upload_reference_frame(
+    session_path: str = Form(...),
+    role: str = Form(...),
+    file: UploadFile = File(...),
+) -> dict[str, Any]:
+    role_norm = str(role or "").strip().lower()
+    if role_norm not in {"start", "end"}:
+        raise HTTPException(status_code=400, detail="role must be 'start' or 'end'")
+
+    session_dir = _resolve_session_dir(session_path)
+    refs_dir = session_dir / "refs"
+    refs_dir.mkdir(parents=True, exist_ok=True)
+
+    suffix = Path(file.filename or "frame.png").suffix.lower() or ".png"
+    safe_suffix = suffix if suffix in {".png", ".jpg", ".jpeg", ".webp"} else ".png"
+    name = f"{role_norm}_frame{safe_suffix}"
+    out_path = refs_dir / name
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="empty upload")
+    out_path.write_bytes(content)
+
+    rel_frame = str(out_path.relative_to(session_dir))
+    return {
+        "ok": True,
+        "session_path": session_path,
+        "role": role_norm,
+        "frame_path": rel_frame,
+    }
+
 @router.post("/run")
 async def start_agent_run(req: RunAgentRequest):
     deprecation_warning = None
@@ -1103,6 +1405,9 @@ async def start_agent_run(req: RunAgentRequest):
     run = _run_narrative_step(
         step="all",
         prompt=req.prompt,
+        preset_prompt=req.preset_prompt,
+        project_name=req.project_name,
+        niche=req.niche,
         session_path=req.session_path if req.session_mode == "existing" else None,
         episodes="new",
         develop=False,
@@ -1112,10 +1417,14 @@ async def start_agent_run(req: RunAgentRequest):
         enable_music=req.enable_music,
         music_provider=req.music_provider,
         lyria_model=req.lyria_model,
+        tts_provider=req.tts_provider,
+        gemini_tts_model=req.gemini_tts_model,
         max_image_requests=req.max_image_requests,
         max_chars_per_episode=req.max_chars_per_episode,
         max_panels_per_episode=req.max_panels_per_episode,
         max_episode_duration_mins=req.max_episode_duration_mins,
+        start_frame_path=req.start_frame_path,
+        end_frame_path=req.end_frame_path,
     )
 
     return {
@@ -1213,6 +1522,9 @@ async def narrative_run_step(req: RunNarrativeStepRequest) -> dict[str, Any]:
     run = _run_narrative_step(
         step=step,
         prompt=req.prompt,
+        preset_prompt=req.preset_prompt,
+        project_name=req.project_name,
+        niche=req.niche,
         session_path=req.session_path if req.session_mode == "existing" else req.session_path,
         episodes=req.episodes,
         develop=req.develop,
@@ -1236,8 +1548,12 @@ async def narrative_run_step(req: RunNarrativeStepRequest) -> dict[str, Any]:
         planner_model=req.planner_model,
         chars_model=req.chars_model,
         scenes_model=req.scenes_model,
+        tts_provider=req.tts_provider,
+        gemini_tts_model=req.gemini_tts_model,
         music_provider=req.music_provider,
         lyria_model=req.lyria_model,
+        start_frame_path=req.start_frame_path,
+        end_frame_path=req.end_frame_path,
     )
 
     hashes = None
@@ -1294,6 +1610,10 @@ async def narrative_run_step_live(req: RunNarrativeStepRequest) -> dict[str, Any
             },
         }
 
+    if req.session_mode != "existing" and not req.session_path:
+        session_dir = ensure_session_outputs(ROOT_DIR)
+        req.session_path = _to_rel_session_path(session_dir)
+
     if req.reset and req.session_path:
         session_dir = _resolve_session_dir(req.session_path)
         for path in _step_reset_paths(session_dir, req.step):
@@ -1312,7 +1632,8 @@ async def narrative_run_step_live(req: RunNarrativeStepRequest) -> dict[str, Any
     worker = threading.Thread(target=_run_narrative_step_worker, args=(job_id, req, step, res), daemon=True)
     worker.start()
 
-    return {"done": False, "job_id": job_id}
+    session_id = str(req.session_path).split("/")[0] if req.session_path else None
+    return {"done": False, "job_id": job_id, "session_path": req.session_path, "session_id": session_id}
 
 
 @router.get("/autoanimator/job/{job_id}")
@@ -1321,6 +1642,30 @@ async def narrative_job_status(job_id: str) -> dict[str, Any]:
     if not state:
         raise HTTPException(status_code=404, detail="Job not found")
     return {"done": state["done"], "result": state["result"]}
+
+
+@router.post("/autoanimator/job/{job_id}/abort")
+async def narrative_abort_job(job_id: str) -> dict[str, Any]:
+    state = _job_state(job_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    proc = state.get("proc")
+    if state.get("done"):
+        return {"ok": True, "job_id": job_id, "aborted": False, "status": "already-finished"}
+    if proc is None:
+        return {"ok": True, "job_id": job_id, "aborted": False, "status": "no-process"}
+
+    try:
+        state["aborted"] = True
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except Exception:
+            proc.terminate()
+        state["queue"].put({"type": "error", "msg": "Abort requested by user. Stopping pipeline..."})
+        return {"ok": True, "job_id": job_id, "aborted": True, "status": "terminating"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to abort job: {e}")
 
 
 @router.post("/autoanimator/copy-character")

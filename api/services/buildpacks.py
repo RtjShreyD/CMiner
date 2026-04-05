@@ -320,6 +320,25 @@ def _resolve_session_id_for_save(scene_id: str | None, session_path: str | None)
     return _new_session_id()
 
 
+def _resolve_autoanimator_runtime_dir(session_id: str, session_path: str | None = None) -> Path:
+    if session_path:
+        path = (OUTPUTS_DIR / session_path).resolve()
+        if path.exists() and path.is_dir():
+            return path
+
+    session_root = OUTPUTS_DIR / session_id
+    if session_root.exists() and session_root.is_dir():
+        for child in sorted(session_root.iterdir()):
+            if child.is_dir():
+                name = child.name.lower()
+                if name == "autoanimator" or name.endswith("_autoanimator"):
+                    return child
+
+    fallback = session_root / "untitled_autoAnimator"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
+
+
 def list_buildpack_options() -> dict[str, Any]:
     cleanup_overlay_samples_dir()
     return {
@@ -596,7 +615,8 @@ def save_overlay_preview_to_session(
     cloud_h: float | None,
 ) -> dict[str, Any]:
     session_id = _resolve_session_id_for_save(scene_id=scene_id, session_path=session_path)
-    target_dir = OUTPUTS_DIR / session_id / "autoAnimator" / "buildpacks"
+    runtime_dir = _resolve_autoanimator_runtime_dir(session_id=session_id, session_path=session_path)
+    target_dir = runtime_dir / "buildpacks"
     target_dir.mkdir(parents=True, exist_ok=True)
 
     preview = generate_overlay_preview(

@@ -1,22 +1,30 @@
 {
   "models": {
     "planner_model": "models/gemini-flash-latest",
+    "director_model": "models/gemini-flash-latest",
+    "director_fallback_model": "models/gemini-2.0-flash-lite",
     "character_image_model": "models/gemini-2.5-flash-image",
     "scene_image_model": "models/gemini-2.5-flash-image",
     "max_image_requests": 50,
-    "max_chars_per_episode": 5,
+    "max_chars_per_episode": 3,
     "max_panels_per_episode": 50,
-    "max_episode_duration_mins": 5
+    "max_episode_duration_mins": 1,
+    "tts_max_parallel_panels": 4,
+    "segment_workers": 2,
+    "music_provider": "lyria",
+    "lyria_model": "lyria-3-clip-preview",
+    "tts_provider": "edge",
+    "gemini_tts_model": "models/gemini-2.5-flash-tts"
   },
   "voice_profiles": {
     "narrator": ["en-US-AriaNeural", "en-GB-SoniaNeural"],
     "hero": ["en-US-ChristopherNeural"],
     "villain": ["en-GB-RyanNeural"],
-    "support": ["en-IN-NeerjaNeural", "hi-IN-SwaraNeural"]
+    "support": ["en-IN-NeerjaNeural", "hi-IN-SwaraNeural"],
+    "hindi": ["hi-IN-SwaraNeural", "hi-IN-MadhurNeural"]
   },
   "video": {
     "resolution": [1280, 720],
-    "fps": 8,
     "target_duration_mins": 5
   },
   "themes": {
@@ -46,10 +54,33 @@
     "youtube_shorts": {"resolution": [1080, 1920], "fps": 30, "duration_mins": 1, "aspect": "9:16"},
     "youtube_widescreen": {"resolution": [1920, 1080], "fps": 30, "duration_mins": 5, "aspect": "16:9"}
   },
+  "niche_bundles": {
+    "out_of_box_simple": {
+      "label": "Out-of-box simple",
+      "director_context": "Keep a clear and broadly appealing storytelling rhythm with low cognitive overhead. Favor concise setup, one strong central conflict beat, and clean payoff. Avoid over-complication and keep staging easy to render while still cinematic."
+    },
+    "1v1_battle": {
+      "label": "1v1 battle",
+      "director_context": "Design the episode around a two-character duel arc: pre-fight tension, tactical exchange, escalation, and decisive closing beat. Prioritize dynamic motion cues, readable action geography, and emotional momentum with minimal cast sprawl."
+    },
+    "1v1_podcast": {
+      "label": "1v1 podcast",
+      "director_context": "Structure as a two-host conversational format with strong verbal chemistry. Focus on topic progression, reaction shots, and pacing beats that alternate insight, conflict, and humor. Keep scenes visually varied through camera language despite limited physical action."
+    },
+    "stage_show": {
+      "label": "Stage show",
+      "director_context": "Frame the episode as a live stage performance with a persistent stage map (judges desk, demo platform, audience axis, LED backdrop). Keep every character's visual identity, spatial position, and role continuity strongly consistent while evolving pose, expression, and camera dynamics shot-by-shot. Use anime-style shot progression (establishing wide, presenter medium, judge close reaction, device hero shot, crowd beat), keep dialogue and scene beats tightly synchronized, enforce strict panel-to-panel continuity, and close with a clear applause/payoff moment."
+    },
+    "series_drama": {
+      "label": "Series drama",
+      "director_context": "Build this as an ongoing high-stakes drama series with strong episode-to-episode continuity, emotionally charged character arcs, and cinematic escalation. Blend intense dialogue beats, occasional high-impact fight sequences, and dynamic visual set-pieces inspired by long-running action dramas like Dragon Ball Super and Swat Kats. Keep pacing serialized: setup, emotional conflict, strategic reveal, and a compelling continuation hook."
+    }
+  },
   "tts_voices_pool": {
     "narrator": ["en-US-AriaNeural", "en-GB-SoniaNeural"],
     "hero": ["en-US-ChristopherNeural"],
     "villain": ["en-GB-RyanNeural"],
-    "support": ["en-IN-NeerjaNeural", "hi-IN-SwaraNeural"]
+    "support": ["en-IN-NeerjaNeural", "hi-IN-SwaraNeural"],
+    "hindi": ["hi-IN-SwaraNeural", "hi-IN-MadhurNeural"]
   }
 }

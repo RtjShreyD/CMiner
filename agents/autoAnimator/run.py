@@ -4,12 +4,31 @@
 import argparse
 import sys
 import json
+import os
+import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
-from agents.autoAnimator.utils import ensure_session_outputs, get_model
+from agents.autoAnimator.utils import (
+    ensure_session_outputs,
+    get_model,
+    autoanimator_session_folder_name,
+)
 from agents.shared.llm_tracker import LLMTracker
+
+
+_STATE_WRITE_LOCK = threading.Lock()
+_GENERIC_PROJECT_NAMES = {
+    "",
+    "autoanimator",
+    "autoanimator project",
+    "project",
+    "untitled",
+    "untitled project",
+}
 
 
 def _first_key(mapping: dict) -> str | None:
@@ -28,6 +47,85 @@ def _parse_json_object(raw: str) -> dict:
         return parsed if isinstance(parsed, dict) else {}
     except Exception:
         return {}
+
+
+def _is_unspecified_project_name(value: str) -> bool:
+    normalized = str(value or "").strip().lower()
+    return normalized in _GENERIC_PROJECT_NAMES
+
+
+def _ensure_project_named_session_dir(session_dir: Path, project_name: str) -> Path:
+    desired_name = autoanimator_session_folder_name(project_name)
+    if session_dir.name == desired_name:
+        return session_dir
+
+    target = session_dir.parent / desired_name
+    if target.exists() and target != session_dir:
+        print(
+            f"Warning: desired session folder '{desired_name}' already exists under {session_dir.parent}. "
+            f"Continuing with existing folder name '{session_dir.name}'."
+        )
+        return session_dir
+
+    session_dir.rename(target)
+    return target
+
+
+def _fallback_project_name(seed_prompt: str, niche_key: str | None) -> str:
+    words = re.findall(r"[A-Za-z0-9]+", str(seed_prompt or ""))
+    title_words = [w.capitalize() for w in words if w]
+    if title_words:
+        if len(title_words) >= 3:
+            return " ".join(title_words[:3])
+        return " ".join(title_words)
+    if niche_key:
+        return f"{str(niche_key).replace('_', ' ').title()} Series"
+    return "AutoAnimator Series"
+
+
+def _auto_assign_project_name(
+    *,
+    model_name: str,
+    seed_prompt: str,
+    niche_key: str | None,
+    tracker: LLMTracker,
+) -> str:
+    fallback = _fallback_project_name(seed_prompt, niche_key)
+    seed = str(seed_prompt or "").strip()
+    if not seed:
+        return fallback
+
+    model = get_model(model_name)
+    prompt = (
+        "You are naming an episodic animation project from a story prompt.\n"
+        "Return ONLY strict JSON: {\"project_name\": \"...\"}.\n"
+        "Rules:\n"
+        "- 2 to 4 words.\n"
+        "- <= 42 characters.\n"
+        "- Distinctive, brandable, and suitable for recurring episodes.\n"
+        "- Do not use generic names like 'AutoAnimator Project'.\n"
+        "- Use title case.\n"
+        "- No punctuation except apostrophe if needed.\n\n"
+        f"NICHE: {niche_key or 'general'}\n"
+        f"STORY_PROMPT:\n{seed}\n"
+    )
+
+    try:
+        from agents.shared.llm_tracker import tracked_generate
+
+        response = tracked_generate(tracker, model, prompt, purpose="project_name_selector")
+        obj = _parse_json_object(getattr(response, "text", "") or "")
+        candidate = str(obj.get("project_name", "")).strip() if isinstance(obj.get("project_name"), str) else ""
+        if not candidate:
+            return fallback
+        candidate = " ".join(candidate.split())
+        if len(candidate) > 42:
+            candidate = candidate[:42].rstrip()
+        if _is_unspecified_project_name(candidate):
+            return fallback
+        return candidate
+    except Exception:
+        return fallback
 
 
 def _auto_select_theme_and_styles(
@@ -100,6 +198,114 @@ def _resolve_art_style_text(style_keys: list[str], art_styles: dict[str, str]) -
     return " + ".join(resolved)
 
 
+def _auto_select_niche(
+    *,
+    model_name: str,
+    base_prompt: str,
+    niche_bundles: dict[str, dict],
+    tracker: LLMTracker,
+) -> str | None:
+    if not niche_bundles:
+        return None
+
+    model = get_model(model_name)
+    prompt = (
+        "You classify a story prompt into exactly one production niche key.\n"
+        "Rules:\n"
+        "- Return ONLY strict JSON.\n"
+        "- niche_key must be one key from niche_options.\n"
+        "- Choose the best single fit for tone, pacing, and structure.\n\n"
+        f"USER_PROMPT:\n{base_prompt}\n\n"
+        f"niche_options: {json.dumps(niche_bundles, ensure_ascii=True)}\n\n"
+        "Return JSON in this shape:\n"
+        "{\n"
+        "  \"niche_key\": \"one_niche_key\"\n"
+        "}"
+    )
+
+    try:
+        from agents.shared.llm_tracker import tracked_generate
+
+        response = tracked_generate(tracker, model, prompt, purpose="niche_selector")
+        obj = _parse_json_object(getattr(response, "text", "") or "")
+    except Exception:
+        obj = {}
+
+    chosen_niche = str(obj.get("niche_key", "")).strip() if isinstance(obj.get("niche_key"), str) else ""
+    if chosen_niche in niche_bundles:
+        return chosen_niche
+    return None
+
+
+def _construct_series_preset_prompt(
+    *,
+    seed_prompt: str,
+    project_name: str,
+    niche_key: str | None,
+) -> str:
+    niche_label = niche_key or "general_series"
+    return (
+        "SERIES SOURCE OF TRUTH (PERSISTENT PRESET)\n"
+        f"PROJECT: {project_name}\n"
+        f"NICHE: {niche_label}\n"
+        "MODE: episodic show/series continuity\n\n"
+        "BASELINE SETUP (authoritative foundation):\n"
+        f"{seed_prompt}\n\n"
+        "SERIES RULES:\n"
+        "- Keep continuity of world setup, recurring cast logic, and tone across episodes.\n"
+        "- Preserve baseline constraints unless the user explicitly requests a change.\n"
+        "- New episode prompts are additive directions, not baseline replacement.\n"
+        "- Reuse established characters and visual identity unless add/remove is requested.\n"
+    )
+
+
+def _llm_compute_series_preset_prompt(
+    *,
+    model_name: str,
+    seed_prompt: str,
+    project_name: str,
+    niche_key: str | None,
+    tracker: LLMTracker,
+) -> str:
+    fallback = _construct_series_preset_prompt(
+        seed_prompt=seed_prompt,
+        project_name=project_name,
+        niche_key=niche_key,
+    )
+
+    if not seed_prompt.strip():
+        return fallback
+
+    model = get_model(model_name)
+    niche_label = niche_key or "general_series"
+    prompt = (
+        "You are creating a persistent SERIES PRESET PROMPT for episodic continuity.\n"
+        "This preset is computed once from the first narrative prompt and reused across future episodes.\n"
+        "Return ONLY strict JSON with key: preset_prompt.\n"
+        "Rules:\n"
+        "- Keep it concise, practical, and production-ready (120-220 words).\n"
+        "- Extract immutable series foundations: world, recurring cast intent, tone, stakes.\n"
+        "- Include continuity rules for future add-on prompts.\n"
+        "- Do NOT copy the user prompt verbatim. Distill and normalize it.\n"
+        "- Do NOT include markdown fences.\n\n"
+        f"PROJECT_NAME: {project_name}\n"
+        f"NICHE: {niche_label}\n"
+        f"FIRST_USER_NARRATIVE_PROMPT:\n{seed_prompt}\n\n"
+        "JSON shape:\n"
+        "{\"preset_prompt\": \"...\"}"
+    )
+
+    try:
+        from agents.shared.llm_tracker import tracked_generate
+
+        response = tracked_generate(tracker, model, prompt, purpose="series_preset_builder")
+        obj = _parse_json_object(getattr(response, "text", "") or "")
+        preset = str(obj.get("preset_prompt", "")).strip() if isinstance(obj.get("preset_prompt"), str) else ""
+        return preset or fallback
+    except Exception:
+        return fallback
+
+
 def _build_aesthetic_guidance(
     *,
     model_name: str,
@@ -146,10 +352,87 @@ def _build_aesthetic_guidance(
         return fallback
 
 
+def _apply_dynamic_fps_policy(
+    manga_board: dict,
+    *,
+    max_duration_mins: int,
+    default_output_fps: int,
+) -> tuple[int, int, int]:
+    """Assign per-panel FPS from director policy and scene intensity within budget constraints.
+
+    Returns (min_fps, max_fps, avg_fps_rounded).
+    """
+    panels = manga_board.get("panels", []) if isinstance(manga_board.get("panels", []), list) else []
+    if not panels:
+        return default_output_fps, default_output_fps, default_output_fps
+
+    rs = manga_board.get("render_strategy", {}) if isinstance(manga_board.get("render_strategy", {}), dict) else {}
+    fps_policy = rs.get("fps_policy", {}) if isinstance(rs.get("fps_policy", {}), dict) else {}
+
+    base_fps = int(fps_policy.get("base_fps", max(12, default_output_fps - 6)) or max(12, default_output_fps - 6))
+    max_fps = int(fps_policy.get("max_fps", default_output_fps) or default_output_fps)
+    min_fps = int(fps_policy.get("min_fps", 12) or 12)
+
+    # Budget-aware clamps.
+    if max_duration_mins <= 1:
+        max_fps = min(max_fps, 24)
+    else:
+        max_fps = min(max_fps, 30)
+    base_fps = max(min_fps, min(base_fps, max_fps))
+
+    action_keywords = [
+        "fight", "battle", "impact", "punch", "kick", "blast", "dash", "combo", "chase",
+        "duel", "clash", "strike", "attack", "explosion", "counter",
+    ]
+    high_motion_moods = {"action", "tense", "dramatic"}
+    high_motion_cameras = {"low-angle", "birds-eye", "wide-shot"}
+
+    assigned: list[int] = []
+    for p in panels:
+        score = 0
+        scene_text = str(p.get("scene_description", "") or "").lower()
+        mood = str(p.get("mood", "") or "").lower()
+        camera = str(p.get("camera_angle", "") or "").lower()
+
+        if any(k in scene_text for k in action_keywords):
+            score += 2
+        if mood in high_motion_moods:
+            score += 1
+        if camera in high_motion_cameras:
+            score += 1
+
+        # Dialogue emotion can hint intensity.
+        for d in (p.get("dialogue", []) if isinstance(p.get("dialogue", []), list) else []):
+            em = str((d or {}).get("emotion", "") or "").lower()
+            if em in {"angry", "tense", "overwhelmed"}:
+                score += 1
+
+        panel_fps = base_fps + (score * 2)
+        panel_fps = max(min_fps, min(max_fps, panel_fps))
+        p["fps"] = int(panel_fps)
+        assigned.append(int(panel_fps))
+
+    rs["fps_policy"] = {
+        "mode": "dynamic",
+        "base_fps": int(base_fps),
+        "min_fps": int(min_fps),
+        "max_fps": int(max_fps),
+        "output_fps": int(default_output_fps),
+    }
+    manga_board["render_strategy"] = rs
+
+    return min(assigned), max(assigned), int(round(sum(assigned) / len(assigned)))
+
+
 def main():
     parser = argparse.ArgumentParser(description="AutoAnimator Pipeline Runner")
     parser.add_argument("--workspace", default=".", help="Workspace root")
     parser.add_argument("--prompt", help="Override base prompt (otherwise reads prompt.txt)")
+    parser.add_argument("--preset_prompt", help="Persistent source-of-truth prompt for episode-mode series")
+    parser.add_argument("--project_name", help="Project or brand name for this session")
+    parser.add_argument("--niche", help="Optional niche bundle key for planner/director guidance")
+    parser.add_argument("--start_frame_path", help="Session-relative path for planner start frame reference")
+    parser.add_argument("--end_frame_path", help="Session-relative path for planner end frame reference")
     parser.add_argument(
         "--step",
         choices=["all", "planner", "chars", "scenes", "audio", "clouds", "music", "video"],
@@ -179,13 +462,26 @@ def main():
     parser.add_argument("--subtitle_style", help="Subtitle style id from buildpack")
     parser.add_argument("--narration_mode", help="Narration mode from buildpack")
     parser.add_argument("--subtitle_scale", type=float, help="Subtitle scale from buildpack")
+    parser.add_argument("--tts_max_parallel_panels", type=int, help="Maximum concurrent panel TTS jobs")
+    parser.add_argument("--segment_workers", type=int, help="Maximum concurrent segment ffmpeg jobs")
+    parser.add_argument(
+        "--tts_provider",
+        choices=["edge", "gemini"],
+        help="TTS provider for audio step",
+    )
+    parser.add_argument(
+        "--gemini_tts_model",
+        help="Gemini TTS model when --tts_provider=gemini",
+    )
     parser.add_argument("--planner_model", help="Override planner model name")
+    parser.add_argument("--director_model", help="Override director model name")
+    parser.add_argument("--director_fallback_model", help="Override director fallback model name")
     parser.add_argument("--character_image_model", help="Override character image model name")
     parser.add_argument("--scene_image_model", help="Override scene image model name")
     parser.add_argument(
         "--music_provider",
         choices=["strudel", "lyria"],
-        default="strudel",
+        default="lyria",
         help="Music generation provider for Step 6",
     )
     parser.add_argument(
@@ -218,8 +514,7 @@ def main():
             sys.exit(1)
         print(f"Continuing in session: {session_dir}")
     else:
-        session_dir = ensure_session_outputs(workspace)
-        print(f"New session directory: {session_dir}")
+        session_dir = ensure_session_outputs(workspace, project_name=(args.project_name or ""))
 
     # ── Load Config ───────────────────────────────────────────
     config_path = Path(__file__).resolve().parent / "config.json"
@@ -230,12 +525,18 @@ def main():
 
     models_config = config.get("models", {})
     planner_model = models_config.get("planner_model", "models/gemini-flash-latest")
+    director_model = models_config.get("director_model", "models/gemini-2.5-flash")
+    director_fallback_model = models_config.get("director_fallback_model", "models/gemini-2.0-flash-lite")
     char_image_model = models_config.get("character_image_model", "models/gemini-2.5-flash-image")
     scene_image_model = models_config.get("scene_image_model", "models/gemini-2.5-flash-image")
     max_image_requests = models_config.get("max_image_requests", 50)
-    max_chars = models_config.get("max_chars_per_episode", 5)
-    max_panels = models_config.get("max_panels_per_episode", 15)
-    max_duration = models_config.get("max_episode_duration_mins", 5)
+    max_chars = models_config.get("max_chars_per_episode", 3)
+    max_panels = models_config.get("max_panels_per_episode", 50)
+    max_duration = models_config.get("max_episode_duration_mins", 1)
+    tts_max_parallel_panels = models_config.get("tts_max_parallel_panels", 4)
+    segment_workers = models_config.get("segment_workers", 2)
+    tts_provider = models_config.get("tts_provider", "edge")
+    gemini_tts_model = models_config.get("gemini_tts_model", "models/gemini-2.5-flash-tts")
 
     if args.max_image_requests:
         max_image_requests = args.max_image_requests
@@ -245,27 +546,116 @@ def main():
         max_panels = args.max_panels_per_episode
     if args.max_episode_duration_mins:
         max_duration = args.max_episode_duration_mins
+    if args.tts_max_parallel_panels:
+        tts_max_parallel_panels = max(1, args.tts_max_parallel_panels)
+    if args.segment_workers:
+        segment_workers = max(1, args.segment_workers)
+    if args.tts_provider:
+        tts_provider = args.tts_provider
+    if args.gemini_tts_model:
+        gemini_tts_model = args.gemini_tts_model
     if args.planner_model:
         planner_model = args.planner_model
+    if args.director_model:
+        director_model = args.director_model
+    if args.director_fallback_model:
+        director_fallback_model = args.director_fallback_model
     if args.character_image_model:
         char_image_model = args.character_image_model
     if args.scene_image_model:
         scene_image_model = args.scene_image_model
     tts_voices_pool = config.get("tts_voices_pool", {})
 
-    base_prompt = args.prompt or ""
-    if not base_prompt:
-        prompt_file = Path(__file__).resolve().parent / "prompt.txt"
-        if prompt_file.exists():
-            base_prompt = prompt_file.read_text().strip()
-            print(f"Loaded base prompt from {prompt_file}")
-        else:
-            base_prompt = "A dramatic manga story."
+    # ── State Management (early) ─────────────────────────────
+    state_path = session_dir / "session_state.json"
+    state = _load_state(state_path)
+
+    input_narrative_prompt = (args.prompt or "").strip()
+    input_preset_prompt = (args.preset_prompt or "").strip()
+    saved_prompt = str(state.get("settings", {}).get("prompt", "") or "").strip()
+    saved_preset_prompt = str(state.get("settings", {}).get("preset_prompt", "") or "").strip()
+
+    # Fallback default for first runs when no prompt is provided.
+    fallback_prompt = "A dramatic manga story."
+    prompt_file = Path(__file__).resolve().parent / "prompt.txt"
+    if prompt_file.exists():
+        try:
+            fallback_prompt = prompt_file.read_text().strip() or fallback_prompt
+        except Exception:
+            fallback_prompt = "A dramatic manga story."
+
+    requested_project_name = (args.project_name or "").strip()
+    prior_project_name = str(state.get("settings", {}).get("project_name", "") or "").strip()
+
+    raw_requested_niche = (args.niche or "").strip()
+    requested_niche_is_auto = raw_requested_niche == "auto-select"
+    requested_niche = raw_requested_niche
+    if requested_niche_is_auto:
+        requested_niche = ""
 
     # Style/theme presets
     themes = config.get("themes", {})
     art_styles = config.get("art_styles", {})
+    niche_bundles = config.get("niche_bundles", {}) if isinstance(config.get("niche_bundles", {}), dict) else {}
     output_presets = config.get("output_presets", {})
+
+    niche_key = requested_niche if requested_niche in niche_bundles else None
+    prompt_for_niche_select = input_narrative_prompt or saved_preset_prompt or saved_prompt or fallback_prompt
+    if requested_niche_is_auto:
+        auto_niche = _auto_select_niche(
+            model_name=planner_model,
+            base_prompt=prompt_for_niche_select,
+            niche_bundles=niche_bundles,
+            tracker=tracker,
+        )
+        niche_key = auto_niche if auto_niche else None
+    niche_bundle = niche_bundles.get(niche_key, {}) if niche_key else {}
+    niche_context = str(niche_bundle.get("director_context", "") or "").strip()
+
+    # Planner should always assign a suitable project name when user input is unspecified.
+    if requested_project_name and not _is_unspecified_project_name(requested_project_name):
+        project_name = requested_project_name
+    elif prior_project_name and not _is_unspecified_project_name(prior_project_name):
+        project_name = prior_project_name
+    else:
+        project_seed = input_narrative_prompt or input_preset_prompt or saved_preset_prompt or saved_prompt or fallback_prompt
+        project_name = _auto_assign_project_name(
+            model_name=planner_model,
+            seed_prompt=project_seed,
+            niche_key=niche_key,
+            tracker=tracker,
+        )
+
+    # Normalize session folder naming to outputs/<session id>/<project-name>_autoAnimator.
+    session_dir = _ensure_project_named_session_dir(session_dir, project_name)
+    state_path = session_dir / "session_state.json"
+    print(f"Active session directory: {session_dir}")
+
+    # Final prompt composition.
+    episode_mode_enabled = args.episode_mode == "true"
+    preset_prompt = input_preset_prompt or (saved_preset_prompt if episode_mode_enabled else "")
+    narrative_prompt = input_narrative_prompt
+
+    if episode_mode_enabled and not preset_prompt:
+        baseline_seed = narrative_prompt or saved_prompt or fallback_prompt
+        preset_prompt = _llm_compute_series_preset_prompt(
+            model_name=planner_model,
+            seed_prompt=baseline_seed,
+            project_name=project_name,
+            niche_key=niche_key,
+            tracker=tracker,
+        )
+
+    if not episode_mode_enabled and not narrative_prompt:
+        narrative_prompt = saved_prompt or fallback_prompt
+
+    if episode_mode_enabled:
+        if narrative_prompt:
+            base_prompt = f"{preset_prompt}\n\nEPISODE ADD-ON REQUEST:\n{narrative_prompt}"
+        else:
+            base_prompt = preset_prompt
+    else:
+        base_prompt = narrative_prompt
 
     requested_theme = (args.theme or "").strip()
     requested_preset = (args.preset or "").strip()
@@ -304,7 +694,7 @@ def main():
 
     video_config = config.get("video", {})
     resolution = tuple(video_config.get("resolution", [1280, 720]))
-    fps = video_config.get("fps", 8)
+    fps = 24
     target_duration = video_config.get("target_duration_mins", 5)
 
     if args.format and args.format in output_presets:
@@ -318,12 +708,33 @@ def main():
     enable_music = args.enable_music
     vector_upscale = args.vector_upscale
 
-    # ── State Management ──────────────────────────────────────
-    state_path = session_dir / "session_state.json"
-    state = _load_state(state_path)
+    if not requested_niche and not requested_niche_is_auto:
+        saved_niche = str(state.get("settings", {}).get("niche", "") or "").strip()
+        if saved_niche and saved_niche in niche_bundles:
+            niche_key = saved_niche
+            niche_bundle = niche_bundles.get(niche_key, {})
+            niche_context = str(niche_bundle.get("director_context", "") or "").strip()
+
+    start_frame_path = (args.start_frame_path or "").strip()
+    end_frame_path = (args.end_frame_path or "").strip()
+    if not start_frame_path:
+        start_frame_path = str(state.get("settings", {}).get("start_frame_path", "") or "").strip()
+    if not end_frame_path:
+        end_frame_path = str(state.get("settings", {}).get("end_frame_path", "") or "").strip()
+    start_frame_path = start_frame_path or None
+    end_frame_path = end_frame_path or None
+
+    persisted_narrative_prompt = narrative_prompt or saved_prompt
 
     state.setdefault("settings", {}).update({
-        "prompt": base_prompt,
+        "prompt": persisted_narrative_prompt,
+        "effective_prompt": base_prompt,
+        "preset_prompt": preset_prompt if episode_mode_enabled else None,
+        "project_name": project_name,
+        "niche": niche_key,
+        "niche_context": niche_context or None,
+        "start_frame_path": start_frame_path,
+        "end_frame_path": end_frame_path,
         "episodes_mode": args.episodes,
         "episode": args.episode,
         "theme": selected_theme_key,
@@ -334,6 +745,8 @@ def main():
         "aesthetic_guidance": aesthetic_guidance,
         "format": args.format,
         "planner_model": planner_model,
+        "director_model": director_model,
+        "director_fallback_model": director_fallback_model,
         "character_image_model": char_image_model,
         "scene_image_model": scene_image_model,
         "resolution": list(resolution),
@@ -346,6 +759,9 @@ def main():
         "max_chars_per_episode": max_chars,
         "max_panels_per_episode": max_panels,
         "max_episode_duration_mins": max_duration,
+        "tts_max_parallel_panels": tts_max_parallel_panels,
+        "tts_provider": tts_provider,
+        "gemini_tts_model": gemini_tts_model,
         "cloud_style": args.cloud_style or "cloud-none",
         "font_style": args.font_style or "font-geist-sans",
         "subtitle_style": args.subtitle_style or "sub-clean-bottom",
@@ -359,6 +775,10 @@ def main():
     print(f"Config: fps={fps}, max_image_requests={max_image_requests}, max_chars={max_chars}")
     print(f"Theme selected: {selected_theme_key or 'none'}")
     print(f"Style keys selected: {', '.join(selected_style_keys) if selected_style_keys else 'none'}")
+    print(f"Niche selected: {niche_key or 'general/none'}")
+    if episode_mode_enabled:
+        print(f"Series preset prompt active: {'yes' if preset_prompt else 'no'}")
+        print(f"Narrative add-on provided: {'yes' if bool(narrative_prompt) else 'no'}")
     print(f"Aesthetic guidance: {aesthetic_guidance}")
 
     # ── Determine what to run ─────────────────────────────────
@@ -376,6 +796,14 @@ def main():
 
         planner = EpisodePlanner(
             model_name=planner_model,
+            director_model_name=director_model,
+            director_fallback_model_name=director_fallback_model,
+            project_name=project_name,
+            preset_prompt=preset_prompt,
+            niche_name=niche_key,
+            niche_context=niche_context,
+            start_frame_path=start_frame_path,
+            end_frame_path=end_frame_path,
             tts_voices_pool=tts_voices_pool,
             max_duration_mins=max_duration,
             max_chars=max_chars,
@@ -383,11 +811,24 @@ def main():
             art_style=art_style,
             aesthetic_guidance=aesthetic_guidance,
             theme=resolved_theme,
+            model_stack={
+                "character_image_model": char_image_model,
+                "scene_image_model": scene_image_model,
+                "tts_engine": "edge-tts",
+                "music_provider": args.music_provider,
+                "lyria_model": args.lyria_model,
+            },
             episode_mode=(args.episode_mode == "true"),
             target_episode=args.episode,
             tracker=tracker,
         )
         manga_board = planner.run(base_prompt, session_dir)
+        min_fps, max_fps_assigned, avg_fps = _apply_dynamic_fps_policy(
+            manga_board,
+            max_duration_mins=max_duration,
+            default_output_fps=fps,
+        )
+        print(f"Dynamic FPS assigned per panel: min={min_fps}, max={max_fps_assigned}, avg={avg_fps}")
 
         # Update state
         ep_num = manga_board.get("episode_number", 1)
@@ -410,6 +851,12 @@ def main():
         if manga_board is None:
             print("Error: No manga-board.json found. Run 'planner' step first.")
             sys.exit(1)
+        min_fps, max_fps_assigned, avg_fps = _apply_dynamic_fps_policy(
+            manga_board,
+            max_duration_mins=max_duration,
+            default_output_fps=fps,
+        )
+        print(f"Dynamic FPS assigned per panel: min={min_fps}, max={max_fps_assigned}, avg={avg_fps}")
 
     ep_num = manga_board.get("episode_number", 1)
     ep_dir = session_dir / "episodes" / f"episode{ep_num}"
@@ -420,11 +867,63 @@ def main():
     char_budget = min(num_chars, max_chars)
     scene_budget = min(num_panels, max_image_requests - char_budget)
     print(f"Image budget: {char_budget} chars + {scene_budget} scenes = {char_budget + scene_budget}/{max_image_requests}")
+    if scene_budget < num_panels:
+        print(
+            f"Warning: scene budget ({scene_budget}) is lower than planned panels ({num_panels}). "
+            "Remaining panels will use local static fallback frames unless budget is increased."
+        )
+
+    run_chars_step = args.step in ["all", "chars"] or (run_generation and not run_specific_step)
+    run_scenes_step = args.step in ["all", "scenes"] or (run_generation and not run_specific_step)
+    run_audio_step = args.step in ["all", "audio"] or (run_generation and not run_specific_step)
+    run_clouds_step = args.step in ["all", "clouds"] or (run_generation and not run_specific_step)
+    run_music_step = args.step in ["all", "music"] or (run_generation and not run_specific_step)
+    run_video_step = args.step in ["all", "video"] or (run_generation and not run_specific_step)
+
+    # In full generation mode, overlap independent steps (audio/music)
+    # while image generation is running.
+    can_parallelize = bool(args.step == "all" and run_generation and not run_specific_step)
+    executor = None
+    audio_future = None
+    music_future = None
+
+    def _run_audio_task():
+        from agents.autoAnimator.chains.tts_gen import TTSGen
+
+        tts_gen = TTSGen(
+            voices_pool=tts_voices_pool,
+            max_parallel_panels=tts_max_parallel_panels,
+            tts_provider=tts_provider,
+            gemini_tts_model=gemini_tts_model,
+            tracker=tracker,
+        )
+        return tts_gen.run(manga_board, session_dir)
+
+    def _run_music_task():
+        from agents.autoAnimator.chains.music_gen import MusicGen
+
+        music_gen = MusicGen(
+            model_name=planner_model,
+            music_provider=args.music_provider,
+            lyria_model=args.lyria_model,
+            tracker=tracker,
+        )
+        return music_gen.run(manga_board, session_dir, base_prompt=base_prompt)
+
+    if can_parallelize:
+        executor = ThreadPoolExecutor(max_workers=2)
+        if run_audio_step:
+            print("[parallel] Scheduled TTS generation.")
+            audio_future = executor.submit(_run_audio_task)
+        if run_music_step and enable_music:
+            print("[parallel] Scheduled music generation.")
+            music_future = executor.submit(_run_music_task)
 
     # ── 2. Character Generation ───────────────────────────────
     chars_manifest_path = session_dir / "chars" / "chars_manifest.json"
     char_manifest = {}
-    if args.step in ["all", "chars"] or (run_generation and not run_specific_step):
+    if run_chars_step:
+        print("[step:chars] Starting character generation.")
         from agents.autoAnimator.chains.char_gen import CharGen
 
         char_gen = CharGen(
@@ -436,6 +935,7 @@ def main():
             tracker=tracker,
         )
         char_manifest = char_gen.run(manga_board, session_dir)
+        print("[step:chars] Character generation complete.")
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["chars_generated"] = True
         _save_state(state_path, state)
     elif chars_manifest_path.exists():
@@ -445,7 +945,8 @@ def main():
     # ── 3. Scene Generation ───────────────────────────────────
     scenes_manifest_path = session_dir / "scenes" / "scenes_manifest.json"
     scenes_manifest = {}
-    if args.step in ["all", "scenes"] or (run_generation and not run_specific_step):
+    if run_scenes_step:
+        print("[step:scenes] Starting scene generation.")
         from agents.autoAnimator.chains.scene_gen import SceneGen
 
         scene_gen = SceneGen(
@@ -454,9 +955,11 @@ def main():
             resolution=resolution,
             art_style=art_style,
             aesthetic_guidance=aesthetic_guidance,
+            project_name=project_name,
             tracker=tracker,
         )
         scenes_manifest = scene_gen.run(manga_board, char_manifest, session_dir)
+        print("[step:scenes] Scene generation complete.")
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["scenes_generated"] = True
         _save_state(state_path, state)
     elif scenes_manifest_path.exists():
@@ -466,11 +969,23 @@ def main():
     # ── 4. TTS Generation ─────────────────────────────────────
     audio_dir = session_dir / "audio"
     audio_files = []
-    if args.step in ["all", "audio"] or (run_generation and not run_specific_step):
-        from agents.autoAnimator.chains.tts_gen import TTSGen
+    if run_audio_step:
+        print("[step:audio] Starting TTS generation.")
+        if audio_future is not None:
+            audio_files = audio_future.result()
+            print("[step:audio] TTS generation complete (parallel result).")
+        else:
+            from agents.autoAnimator.chains.tts_gen import TTSGen
 
-        tts_gen = TTSGen(voices_pool=tts_voices_pool)
-        audio_files = tts_gen.run(manga_board, session_dir)
+            tts_gen = TTSGen(
+                voices_pool=tts_voices_pool,
+                max_parallel_panels=tts_max_parallel_panels,
+                tts_provider=tts_provider,
+                gemini_tts_model=gemini_tts_model,
+                tracker=tracker,
+            )
+            audio_files = tts_gen.run(manga_board, session_dir)
+            print("[step:audio] TTS generation complete.")
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["audio_generated"] = True
         _save_state(state_path, state)
     else:
@@ -480,35 +995,95 @@ def main():
         )
 
     # ── 5. Cloud Generation (OpenCV – no LLM) ────────────────
-    if args.step in ["all", "clouds"] or (run_generation and not run_specific_step):
+    if run_clouds_step:
         from agents.autoAnimator.chains.cloud_gen import CloudGen
 
         settings = state.get("settings", {})
-        cloud_gen = CloudGen(
-            fps=fps,
-            resolution=resolution,
-            cloud_style=settings.get("cloud_style", "cloud-none"),
-            font_style=settings.get("font_style", "font-geist-sans"),
-            subtitle_style=settings.get("subtitle_style", "sub-clean-bottom"),
-            narration_mode=settings.get("narration_mode", "hybrid_subtitles_clouds"),
-            subtitle_scale=float(settings.get("subtitle_scale", 1.0) or 1.0),
-        )
-        cloud_gen.run(manga_board, session_dir)
+        print("[step:clouds] Starting overlay generation.")
+
+        def _run_cloud_widescreen():
+            print("[clouds:fullvideo] Generating widescreen overlays.")
+            cloud_gen = CloudGen(
+                fps=fps,
+                resolution=resolution,
+                project_name=project_name,
+                episode_number=ep_num,
+                overlay_dir_name="overlays",
+                cloud_style=settings.get("cloud_style", "cloud-none"),
+                font_style=settings.get("font_style", "font-geist-sans"),
+                subtitle_style=settings.get("subtitle_style", "sub-clean-bottom"),
+                narration_mode=settings.get("narration_mode", "hybrid_subtitles_clouds"),
+                subtitle_scale=float(settings.get("subtitle_scale", 1.0) or 1.0),
+                subtitle_x=settings.get("subtitle_x"),
+                subtitle_y=settings.get("subtitle_y"),
+                cloud_x=settings.get("cloud_x"),
+                cloud_y=settings.get("cloud_y"),
+                cloud_w=settings.get("cloud_w"),
+                cloud_h=settings.get("cloud_h"),
+            )
+            cloud_gen.run(manga_board, session_dir)
+            print("[clouds:fullvideo] Widescreen overlays ready.")
+
+        def _run_cloud_shorts():
+            shorts_cfg = output_presets.get("youtube_shorts", {})
+            shorts_resolution = tuple(shorts_cfg.get("resolution", [1080, 1920]))
+            shorts_fps = int(shorts_cfg.get("fps", fps))
+            print("[clouds:shorts] Generating shorts overlays.")
+            shorts_cloud_gen = CloudGen(
+                fps=shorts_fps,
+                resolution=shorts_resolution,
+                project_name=project_name,
+                episode_number=ep_num,
+                overlay_dir_name="overlays_youtube_shorts",
+                cloud_style=settings.get("cloud_style", "cloud-none"),
+                font_style=settings.get("font_style", "font-geist-sans"),
+                subtitle_style=settings.get("subtitle_style", "sub-clean-bottom"),
+                narration_mode=settings.get("narration_mode", "hybrid_subtitles_clouds"),
+                subtitle_scale=float(settings.get("subtitle_scale", 1.0) or 1.0),
+                subtitle_x=settings.get("subtitle_x"),
+                subtitle_y=settings.get("subtitle_y"),
+                cloud_x=settings.get("cloud_x"),
+                cloud_y=settings.get("cloud_y"),
+                cloud_w=settings.get("cloud_w"),
+                cloud_h=settings.get("cloud_h"),
+            )
+            shorts_cloud_gen.run(manga_board, session_dir)
+            print("[clouds:shorts] Shorts overlays ready.")
+
+        should_generate_shorts_clouds = bool(args.format == "youtube_widescreen" and output_presets.get("youtube_shorts"))
+        if should_generate_shorts_clouds:
+            with ThreadPoolExecutor(max_workers=2) as clouds_pool:
+                futures = [
+                    clouds_pool.submit(_run_cloud_widescreen),
+                    clouds_pool.submit(_run_cloud_shorts),
+                ]
+                for f in futures:
+                    f.result()
+        else:
+            _run_cloud_widescreen()
+
+        print("[step:clouds] Overlay generation complete.")
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["clouds_generated"] = True
         _save_state(state_path, state)
 
     # ── 6. Music Generation (optional) ───────────────────────
-    if args.step in ["all", "music"] or (run_generation and not run_specific_step):
+    if run_music_step:
+        print("[step:music] Starting music generation.")
         if enable_music:
-            from agents.autoAnimator.chains.music_gen import MusicGen
+            if music_future is not None:
+                music_path = music_future.result()
+                print("[step:music] Music generation complete (parallel result).")
+            else:
+                from agents.autoAnimator.chains.music_gen import MusicGen
 
-            music_gen = MusicGen(
-                model_name=planner_model,
-                music_provider=args.music_provider,
-                lyria_model=args.lyria_model,
-                tracker=tracker,
-            )
-            music_path = music_gen.run(manga_board, session_dir, base_prompt=base_prompt)
+                music_gen = MusicGen(
+                    model_name=planner_model,
+                    music_provider=args.music_provider,
+                    lyria_model=args.lyria_model,
+                    tracker=tracker,
+                )
+                music_path = music_gen.run(manga_board, session_dir, base_prompt=base_prompt)
+                print("[step:music] Music generation complete.")
             state.setdefault("episodes", {}).setdefault(str(ep_num), {})["music_generated"] = bool(music_path)
             _save_state(state_path, state)
         else:
@@ -517,7 +1092,8 @@ def main():
             _save_state(state_path, state)
 
     # ── 7. Movie Maker ────────────────────────────────────────
-    if args.step in ["all", "video"] or (run_generation and not run_specific_step):
+    if run_video_step:
+        print("[step:video] Starting video assembly.")
         from agents.autoAnimator.chains.moviemaker import MovieMaker
 
         if not scenes_manifest and scenes_manifest_path.exists():
@@ -529,25 +1105,94 @@ def main():
                 + [str(p) for p in audio_dir.glob("panel_*.wav")]
             )
 
-        maker = MovieMaker(fps=fps, resolution=resolution, enable_music=enable_music)
-        final_video = maker.run(manga_board, scenes_manifest, audio_files, session_dir)
-        rendered_videos = [str(final_video)] if final_video else []
+        def _render_widescreen() -> Path:
+            maker = MovieMaker(
+                fps=fps,
+                resolution=resolution,
+                enable_music=enable_music,
+                segment_workers=segment_workers,
+            )
+            return maker.run(
+                manga_board,
+                scenes_manifest,
+                audio_files,
+                session_dir,
+                project_name=project_name,
+                overlay_dir_name="overlays",
+                max_duration_seconds=float(max_duration * 60),
+            )
+
+        rendered_videos = []
+        final_video = Path("")
 
         # When YouTube Video is selected, also export a Shorts variant by default.
         if args.format == "youtube_widescreen" and output_presets.get("youtube_shorts"):
             shorts_cfg = output_presets.get("youtube_shorts", {})
             shorts_resolution = tuple(shorts_cfg.get("resolution", [1080, 1920]))
             shorts_fps = int(shorts_cfg.get("fps", fps))
-            shorts_maker = MovieMaker(fps=shorts_fps, resolution=shorts_resolution, enable_music=enable_music)
-            shorts_video = shorts_maker.run(
-                manga_board,
-                scenes_manifest,
-                audio_files,
-                session_dir,
-                output_suffix="youtube_shorts",
-            )
+
+            def _render_shorts() -> Path:
+                from agents.autoAnimator.chains.cloud_gen import CloudGen
+
+                # Ensure shorts overlays exist; generate only if missing (e.g. video-only rerun).
+                shorts_overlay_root = session_dir / "overlays_youtube_shorts"
+                if not shorts_overlay_root.exists() or not any(shorts_overlay_root.iterdir()):
+                    settings = state.get("settings", {})
+                    print("[video:shorts] Shorts overlays missing; generating before render.")
+                    shorts_cloud_gen = CloudGen(
+                        fps=shorts_fps,
+                        resolution=shorts_resolution,
+                        project_name=project_name,
+                        episode_number=ep_num,
+                        overlay_dir_name="overlays_youtube_shorts",
+                        cloud_style=settings.get("cloud_style", "cloud-none"),
+                        font_style=settings.get("font_style", "font-geist-sans"),
+                        subtitle_style=settings.get("subtitle_style", "sub-clean-bottom"),
+                        narration_mode=settings.get("narration_mode", "hybrid_subtitles_clouds"),
+                        subtitle_scale=float(settings.get("subtitle_scale", 1.0) or 1.0),
+                        subtitle_x=settings.get("subtitle_x"),
+                        subtitle_y=settings.get("subtitle_y"),
+                        cloud_x=settings.get("cloud_x"),
+                        cloud_y=settings.get("cloud_y"),
+                        cloud_w=settings.get("cloud_w"),
+                        cloud_h=settings.get("cloud_h"),
+                    )
+                    shorts_cloud_gen.run(manga_board, session_dir)
+                else:
+                    print("[video:shorts] Reusing pre-generated shorts overlays.")
+
+                shorts_maker = MovieMaker(
+                    fps=shorts_fps,
+                    resolution=shorts_resolution,
+                    enable_music=enable_music,
+                    segment_workers=segment_workers,
+                )
+                return shorts_maker.run(
+                    manga_board,
+                    scenes_manifest,
+                    audio_files,
+                    session_dir,
+                    project_name=project_name,
+                    output_suffix="youtube_shorts",
+                    overlay_dir_name="overlays_youtube_shorts",
+                    max_duration_seconds=float(max_duration * 60),
+                )
+
+            with ThreadPoolExecutor(max_workers=2) as render_pool:
+                print("[step:video] Rendering fullvideo and shorts in parallel.")
+                wide_future = render_pool.submit(_render_widescreen)
+                shorts_future = render_pool.submit(_render_shorts)
+                final_video = wide_future.result()
+                shorts_video = shorts_future.result()
+
+            if final_video:
+                rendered_videos.append(str(final_video))
             if shorts_video:
                 rendered_videos.append(str(shorts_video))
+        else:
+            final_video = _render_widescreen()
+            if final_video:
+                rendered_videos.append(str(final_video))
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["status"] = "complete"
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["video"] = str(final_video)
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["videos"] = rendered_videos
@@ -559,10 +1204,14 @@ def main():
         print(f"Task Complete. Final Output: {final_video}")
         if len(rendered_videos) > 1:
             print(f"Additional outputs: {rendered_videos[1:]}")
+        print("[step:video] Video assembly complete.")
     elif run_specific_step:
         print(f"Step '{args.step}' complete in {session_dir}")
 
     # ── Save LLM usage report ─────────────────────────────────
+    if executor is not None:
+        executor.shutdown(wait=False)
+
     if tracker.calls:
         tracker.save(session_dir)
 
@@ -577,8 +1226,13 @@ def _load_state(state_path: Path) -> dict:
 
 
 def _save_state(state_path: Path, state: dict):
-    with open(state_path, "w") as f:
-        json.dump(state, f, indent=2)
+    with _STATE_WRITE_LOCK:
+        tmp_path = state_path.with_suffix(state_path.suffix + ".tmp")
+        with open(tmp_path, "w") as f:
+            json.dump(state, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, state_path)
 
 
 def _load_manga_board(session_dir: Path, episode_num: int = None) -> dict | None:

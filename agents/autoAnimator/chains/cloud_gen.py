@@ -9,6 +9,7 @@ Produces: overlays/panel_XX/frame_XXXX.png (transparent PNGs)
 """
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 
@@ -23,23 +24,59 @@ class CloudGen:
         self,
         fps: int = 24,
         resolution: Tuple[int, int] = (1280, 720),
+        project_name: str = "AutoAnimator",
+        episode_number: int = 1,
+        overlay_dir_name: str = "overlays",
         cloud_style: str = "cloud-none",
         font_style: str = "font-geist-sans",
         subtitle_style: str = "sub-clean-bottom",
         narration_mode: str = "hybrid_subtitles_clouds",
         subtitle_scale: float = 1.0,
+        subtitle_x: float | None = None,
+        subtitle_y: float | None = None,
+        cloud_x: float | None = None,
+        cloud_y: float | None = None,
+        cloud_w: float | None = None,
+        cloud_h: float | None = None,
     ):
         self.fps = fps
         self.resolution = resolution
+        self.project_name = project_name or "AutoAnimator"
+        self.episode_number = max(1, int(episode_number or 1))
+        self.overlay_dir_name = (overlay_dir_name or "overlays").strip() or "overlays"
         self.cloud_style = cloud_style
         self.font_style = font_style
         self.subtitle_style = subtitle_style
         self.narration_mode = narration_mode
         self.subtitle_scale = subtitle_scale
+        self.subtitle_x = subtitle_x
+        self.subtitle_y = subtitle_y
+        self.cloud_x = cloud_x
+        self.cloud_y = cloud_y
+        self.cloud_w = cloud_w
+        self.cloud_h = cloud_h
+
+    @staticmethod
+    def _audio_duration_seconds(path: Path) -> float:
+        try:
+            res = subprocess.run(
+                [
+                    "ffprobe", "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    str(path),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return float((res.stdout or "").strip() or 0.0)
+        except Exception:
+            return 0.0
 
     def run(self, manga_board: Dict[str, Any], session_dir: Path):
         print("--- Pipeline: Cloud Generation (OpenCV) ---")
-        overlays_dir = session_dir / "overlays"
+        overlays_dir = session_dir / self.overlay_dir_name
         overlays_dir.mkdir(parents=True, exist_ok=True)
         scenes_dir = session_dir / "scenes"
         audio_dir = session_dir / "audio"
@@ -87,35 +124,48 @@ class CloudGen:
 
             # Calculate total frames from timing
             last_t = timings[-1]
-            total_sec = (last_t["offset"] + last_t["duration"]) / 10_000_000.0
-            total_frames = int(total_sec * self.fps) + 5
+            total_sec_timing = (last_t["offset"] + last_t["duration"]) / 10_000_000.0
+            audio_path = audio_dir / f"{panel_key}.mp3"
+            if not audio_path.exists():
+                wav_path = audio_dir / f"{panel_key}.wav"
+                audio_path = wav_path if wav_path.exists() else audio_path
+            total_sec_audio = self._audio_duration_seconds(audio_path) if audio_path.exists() else 0.0
+            total_sec = max(total_sec_timing, total_sec_audio)
+            panel_fps = max(8, int(panel.get("fps", self.fps) or self.fps))
+            total_frames = max(1, int(np.ceil(total_sec * panel_fps)) + 2)
 
             panel_overlay_dir = overlays_dir / panel_key
             panel_overlay_dir.mkdir(parents=True, exist_ok=True)
 
-            print(f"Generating {total_frames} cloud frames for {panel_key}")
+            print(f"Generating {total_frames} cloud frames for {panel_key} at {panel_fps} fps")
 
             # Sync offset (200_000 units = 20ms advance)
             SYNC_OFFSET = 200_000
+            timing_idx = 0
+            char_words: Dict[str, List[str]] = {}
+            active_char = None
 
             for frame_idx in range(total_frames):
-                current_time_sec = frame_idx / self.fps
+                current_time_sec = frame_idx / panel_fps
                 current_time_units = (current_time_sec * 10_000_000) + SYNC_OFFSET
 
-                # Gather spoken words up to now, grouped by character
-                char_words: Dict[str, List[str]] = {}
-                active_char = None
-                for t in timings:
-                    if t["offset"] <= current_time_units:
-                        cname = t.get("character", "Unknown")
-                        active_char = cname
-                        if cname not in char_words:
-                            char_words[cname] = []
-                        char_words[cname].append(t["text"])
+                # Incrementally consume timing entries up to current frame time.
+                while timing_idx < len(timings) and timings[timing_idx]["offset"] <= current_time_units:
+                    t = timings[timing_idx]
+                    cname = t.get("character", "Unknown")
+                    active_char = cname
+                    if cname not in char_words:
+                        char_words[cname] = []
+                    char_words[cname].append(t.get("text", ""))
+                    timing_idx += 1
 
                 # Create transparent overlay
                 img = Image.new("RGBA", self.resolution, (0, 0, 0, 0))
                 draw = ImageDraw.Draw(img)
+
+                if i == 0 and frame_idx == 0:
+                    title = f"{self.project_name} - Episode {self.episode_number}"
+                    self._draw_title_overlay(draw, title, font)
 
                 # Show currently speaking text with the same styles used by buildpack preview.
                 if active_char and active_char in char_words:
@@ -207,20 +257,10 @@ class CloudGen:
             return
 
         # Measure text block
-        line_heights = []
-        for line in lines:
-            try:
-                bbox = font.getbbox(line)
-                line_heights.append(bbox[3] - bbox[1])
-            except AttributeError:
-                w_dim, h_dim = draw.textsize(line, font=font)
-                line_heights.append(h_dim)
+        line_heights = [self._text_height(draw, font, line) for line in lines]
 
         total_h = sum(line_heights) + (len(lines) - 1) * 4
-        try:
-            max_w = max(font.getbbox(line)[2] - font.getbbox(line)[0] for line in lines)
-        except AttributeError:
-            max_w = max(draw.textsize(line, font=font)[0] for line in lines)
+        max_w = max(self._text_width(draw, font, line) for line in lines)
 
         bw = max_w + pad * 2
         bh = total_h + pad * 2
@@ -228,6 +268,18 @@ class CloudGen:
 
         bx1, by1 = position
         width, height = self.resolution
+
+        # BuildPack-configured cloud placement overrides auto-computed positions.
+        if self.cloud_x is not None:
+            bx1 = int(width * max(0.0, min(float(self.cloud_x), 0.95)))
+        if self.cloud_y is not None:
+            by1 = int(height * max(0.0, min(float(self.cloud_y), 0.95)))
+        if self.cloud_w is not None:
+            bw = int(width * max(0.12, min(float(self.cloud_w), 0.9)))
+            bx2 = bx1 + bw
+        if self.cloud_h is not None:
+            bh = int(height * max(0.08, min(float(self.cloud_h), 0.75)))
+            by2 = by1 + bh
 
         # Clamp within frame
         if bx1 + bw > width - 40:
@@ -249,29 +301,104 @@ class CloudGen:
                 draw.text((bx1 + pad, cy), line, font=font, fill=(12, 18, 34, 255))
                 cy += line_heights[j] + 4
 
-        band_h = max(80, int(self.resolution[1] * 0.11))
-        if subtitle_style.get("position") == "top":
-            band = (0, 0, self.resolution[0], band_h)
-            text_y = 14
-        else:
-            band = (0, self.resolution[1] - band_h, self.resolution[0], self.resolution[1])
-            text_y = self.resolution[1] - band_h + 14
-        draw.rectangle(band, fill=tuple(subtitle_style.get("band_fill", [0, 0, 0, 140])))
+        # Subtitle region follows BuildPack layout points and clamps to resolution.
+        width, height = self.resolution
+        side_margin = max(18, int(width * 0.04))
+        subtitle_x_norm = max(0.0, min(float(self.subtitle_x) if self.subtitle_x is not None else 0.06, 0.95))
+        subtitle_x_px = int(width * subtitle_x_norm)
+        band_pad_x = max(14, int(width * 0.016))
+        band_pad_y = max(10, int(height * 0.008))
+        subtitle_max_width = max(160, width - subtitle_x_px - side_margin - (2 * band_pad_x))
+
+        # Never collapse subtitles into a tiny corner box. Keep a wide bracket region,
+        # especially on Shorts, then place text within that region.
+        min_region_ratio = 0.72 if height > width else 0.58
+        min_region_width = int(width * min_region_ratio)
+        if subtitle_max_width < min_region_width:
+            subtitle_x_px = side_margin + band_pad_x
+            subtitle_max_width = max(220, width - (2 * side_margin) - (2 * band_pad_x))
 
         summary = " ".join(lines)
-        try:
-            text_w = draw.textbbox((0, 0), summary, font=font)[2]
-        except AttributeError:
-            text_w = draw.textsize(summary, font=font)[0]
-        text_x = max((self.resolution[0] - text_w) // 2, 24)
-        draw.text(
-            (text_x, text_y),
-            summary,
-            font=font,
-            fill=tuple(subtitle_style.get("fill", [245, 245, 245])),
-            stroke_width=int(subtitle_style.get("stroke_width", 2)),
-            stroke_fill=tuple(subtitle_style.get("stroke", [0, 0, 0])),
+        subtitle_lines = self._wrap_text(summary, font, draw, subtitle_max_width)
+        if not subtitle_lines:
+            return
+
+        # Keep subtitle blocks compact; overflow wraps and truncates softly.
+        max_subtitle_lines = 3
+        if len(subtitle_lines) > max_subtitle_lines:
+            subtitle_lines = subtitle_lines[:max_subtitle_lines]
+            subtitle_lines[-1] = subtitle_lines[-1].rstrip() + "..."
+
+        subtitle_line_heights = [self._text_height(draw, font, line) for line in subtitle_lines]
+        subtitle_text_h = sum(subtitle_line_heights) + max(0, (len(subtitle_lines) - 1) * 4)
+        band_h = max(int(height * 0.11), subtitle_text_h + (2 * band_pad_y))
+
+        # Keep subtitle bracket area stable and wide across aspect ratios.
+        band_x1 = side_margin
+        band_x2 = width - side_margin
+        subtitle_x_px = max(band_x1 + band_pad_x, min(subtitle_x_px, band_x2 - band_pad_x - 40))
+
+        if self.subtitle_y is not None:
+            band_y1 = int(height * max(0.0, min(float(self.subtitle_y), 0.95))) - band_pad_y
+            band_y1 = max(0, min(height - band_h, band_y1))
+        else:
+            subtitle_position = str(subtitle_style.get("position", "bottom"))
+            if subtitle_position == "top":
+                band_y1 = max(10, int(height * 0.02))
+            else:
+                band_y1 = height - band_h - max(12, int(height * 0.02))
+        band_y2 = band_y1 + band_h
+
+        band = (band_x1, band_y1, band_x2, band_y2)
+        if hasattr(draw, "rounded_rectangle"):
+            draw.rounded_rectangle(band, radius=max(12, int(height * 0.01)), fill=tuple(subtitle_style.get("band_fill", [0, 0, 0, 140])))
+        else:
+            draw.rectangle(band, fill=tuple(subtitle_style.get("band_fill", [0, 0, 0, 140])))
+
+        text_y = band_y1 + band_pad_y
+        for idx, line in enumerate(subtitle_lines):
+            text_w = self._text_width(draw, font, line)
+            text_x = max(band_x1 + band_pad_x, min(subtitle_x_px, band_x2 - band_pad_x - text_w))
+            draw.text(
+                (text_x, text_y),
+                line,
+                font=font,
+                fill=tuple(subtitle_style.get("fill", [245, 245, 245])),
+                stroke_width=int(subtitle_style.get("stroke_width", 2)),
+                stroke_fill=tuple(subtitle_style.get("stroke", [0, 0, 0])),
+            )
+            text_y += subtitle_line_heights[idx] + 4
+
+    def _draw_title_overlay(self, draw: ImageDraw.ImageDraw, title: str, font: ImageFont.FreeTypeFont):
+        width, height = self.resolution
+        pad_x = max(16, int(width * 0.02))
+        pad_y = max(10, int(height * 0.015))
+        text_w = self._text_width(draw, font, title)
+        text_h = self._text_height(draw, font, title)
+        box = (
+            pad_x,
+            pad_y,
+            min(width - pad_x, pad_x + text_w + 24),
+            pad_y + text_h + 16,
         )
+        fill = (0, 0, 0, 140)
+        if hasattr(draw, "rounded_rectangle"):
+            draw.rounded_rectangle(box, radius=10, fill=fill)
+        else:
+            draw.rectangle(box, fill=fill)
+        draw.text((pad_x + 12, pad_y + 8), title, font=font, fill=(240, 240, 240, 255))
+
+    def _text_width(self, draw: ImageDraw.ImageDraw, font: ImageFont.FreeTypeFont, text: str) -> int:
+        try:
+            return max(0, font.getbbox(text)[2] - font.getbbox(text)[0])
+        except AttributeError:
+            return draw.textsize(text, font=font)[0]
+
+    def _text_height(self, draw: ImageDraw.ImageDraw, font: ImageFont.FreeTypeFont, text: str) -> int:
+        try:
+            return max(0, font.getbbox(text)[3] - font.getbbox(text)[1])
+        except AttributeError:
+            return draw.textsize(text, font=font)[1]
 
     def _wrap_text(self, text, font, draw, max_width):
         words = text.split()
@@ -280,10 +407,7 @@ class CloudGen:
         for word in words:
             current_line.append(word)
             test = " ".join(current_line)
-            try:
-                w = font.getbbox(test)[2] - font.getbbox(test)[0]
-            except AttributeError:
-                w, _ = draw.textsize(test, font=font)
+            w = self._text_width(draw, font, test)
             if w > max_width:
                 if len(current_line) == 1:
                     lines.append(current_line[0])

@@ -20,7 +20,7 @@ class MusicGen:
     def __init__(
         self,
         model_name: str = "models/gemini-flash-latest",
-        music_provider: str = "strudel",
+        music_provider: str = "lyria",
         lyria_model: str = "lyria-3-clip-preview",
         tracker: Optional[LLMTracker] = None,
     ):

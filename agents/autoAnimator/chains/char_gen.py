@@ -7,6 +7,7 @@ Art style is enforced from config for cross-episode consistency.
 """
 
 import json
+import shutil
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 
@@ -83,6 +84,20 @@ class CharGen:
         manifest: Dict[str, str] = {}
         anchor_path = None
         gen_count = 0
+        model = get_model(self.image_model_name)
+        current_episode = max(1, int(manga_board.get("episode_number", 1) or 1))
+        episode_chars_dir = session_dir / "episodes" / f"episode{current_episode}" / "chars"
+        episode_chars_dir.mkdir(parents=True, exist_ok=True)
+
+        existing_manifest_path = chars_dir / "chars_manifest.json"
+        existing_manifest: Dict[str, str] = {}
+        if existing_manifest_path.exists():
+            try:
+                parsed = json.loads(existing_manifest_path.read_text(encoding="utf-8"))
+                if isinstance(parsed, dict):
+                    existing_manifest = {str(k): str(v) for k, v in parsed.items()}
+            except Exception:
+                existing_manifest = {}
 
         for i, char in enumerate(characters):
             if gen_count >= self.max_generations:
@@ -94,6 +109,22 @@ class CharGen:
             char_path = chars_dir / f"char_{safe_name}.png"
             force_regen = bool(force_names and name in force_names)
 
+            # Allow planner/director to explicitly reuse an existing character image.
+            reuse_char = str(char.get("reuse_character_from", "") or "").strip()
+            if not force_regen and reuse_char:
+                source_path = existing_manifest.get(reuse_char)
+                if source_path:
+                    src = Path(source_path)
+                    if src.exists() and self._is_valid_generated_image(src):
+                        shutil.copy2(src, char_path)
+                        manifest[name] = str(char_path)
+                        ep_copy = episode_chars_dir / f"char_{safe_name}.png"
+                        shutil.copy2(char_path, ep_copy)
+                        if anchor_path is None:
+                            anchor_path = char_path
+                        print(f"Reused character image for {name} from {reuse_char}.")
+                        continue
+
             # Resume: skip only if existing image is valid.
             if char_path.exists():
                 if force_regen:
@@ -103,6 +134,8 @@ class CharGen:
                     if self._is_valid_generated_image(char_path):
                         print(f"Found existing portrait for {name}, skipping.")
                         manifest[name] = str(char_path)
+                        ep_copy = episode_chars_dir / f"char_{safe_name}.png"
+                        shutil.copy2(char_path, ep_copy)
                         if anchor_path is None:
                             anchor_path = char_path
                         continue
@@ -115,13 +148,13 @@ class CharGen:
             print(f"Generating portrait ({gen_count + 1}/{self.max_generations}): {name}")
 
             generated_ok = False
-            model = get_model(self.image_model_name)
             max_attempts = 3
+            anchor_bytes = None
+            if anchor_path and anchor_path.exists():
+                anchor_bytes = anchor_path.read_bytes()
             for attempt in range(1, max_attempts + 1):
                 try:
-                    if anchor_path and anchor_path.exists():
-                        with open(anchor_path, "rb") as f:
-                            anchor_bytes = f.read()
+                    if anchor_bytes:
                         response = tracked_generate(
                             self.tracker,
                             model,
@@ -155,6 +188,8 @@ class CharGen:
                 raise RuntimeError(f"Character generation failed for '{name}' after {max_attempts} attempts")
 
             manifest[name] = str(char_path)
+            ep_copy = episode_chars_dir / f"char_{safe_name}.png"
+            shutil.copy2(char_path, ep_copy)
             if anchor_path is None:
                 anchor_path = char_path
 
