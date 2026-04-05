@@ -16,7 +16,7 @@ def ensure_session_outputs(base_dir: Path) -> Path:
     """Create a new session directory with all required subdirectories."""
     outputs_dir = base_dir / "outputs"
     session_id = _new_session_id()
-    session_dir = outputs_dir / session_id / "narrativeManga"
+    session_dir = outputs_dir / session_id / "AutoAnimator"
     session_dir.mkdir(parents=True, exist_ok=True)
 
     for subdir in ["episodes", "chars", "scenes", "audio", "overlays", "frames"]:

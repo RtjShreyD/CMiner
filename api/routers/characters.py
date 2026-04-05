@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from PIL import Image
 
-from agents.narrativeManga.utils import get_model
+from agents.autoAnimator.utils import get_model
 
 from api.services.registry_store import (
     CHARACTERS_DIR,

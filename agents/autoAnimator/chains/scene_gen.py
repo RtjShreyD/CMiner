@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional, Tuple
 
 from PIL import Image
 
-from agents.narrativeManga.utils import get_model
+from agents.autoAnimator.utils import get_model
 from agents.shared.llm_tracker import LLMTracker, tracked_generate
 
 
@@ -23,12 +23,14 @@ class SceneGen:
         max_generations: int = 45,
         resolution: Tuple[int, int] = (1280, 720),
         art_style: str = "cinematic anime",
+        aesthetic_guidance: str = "",
         tracker: Optional[LLMTracker] = None,
     ):
         self.image_model_name = image_model_name
         self.max_generations = max_generations
         self.resolution = resolution
         self.art_style = art_style
+        self.aesthetic_guidance = aesthetic_guidance or ""
         self.tracker = tracker
 
     @staticmethod
@@ -118,11 +120,13 @@ class SceneGen:
             chars_in_scene = "; ".join(char_snippets) if char_snippets else "No specific characters"
 
             width, height = self.resolution
+            aesthetics = f"Aesthetic direction: {self.aesthetic_guidance}. " if self.aesthetic_guidance else ""
             prompt = (
                 f"A cinematic manga panel. {scene_desc}. "
                 f"Camera: {camera}. Mood: {mood}. "
                 f"Characters in scene: {chars_in_scene}. "
                 f"Art style: {self.art_style}. "
+                f"{aesthetics}"
                 f"CRITICAL: {width}:{height} aspect (exact {width}x{height}) resolution."
             )
 

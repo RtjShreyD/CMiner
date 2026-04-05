@@ -5,9 +5,16 @@ import types
 from pathlib import Path
 from unittest import mock
 
-# Stub the google.genai module used by narrativeManga.utils
+# Stub the google.genai module used by AutoAnimator.utils
 google = types.ModuleType("google")
 genai = types.ModuleType("google.genai")
+genai_types = types.ModuleType("google.genai.types")
+
+
+class _Part:
+    @staticmethod
+    def from_bytes(data=None, mime_type=None):
+        return {"data": data, "mime_type": mime_type}
 
 class _Models:
     def generate_content(self, model=None, contents=None):
@@ -18,6 +25,8 @@ class Client:
         self.models = _Models()
 
 setattr(genai, "Client", Client)
+setattr(genai_types, "Part", _Part)
+setattr(genai, "types", genai_types)
 setattr(google, "genai", genai)
 
 # Stub dotenv
@@ -28,9 +37,10 @@ setattr(dotenv, "load_dotenv", load_dotenv)
 
 sys.modules["google"] = google
 sys.modules["google.genai"] = genai
+sys.modules["google.genai.types"] = genai_types
 sys.modules["dotenv"] = dotenv
 
-from agents.narrativeManga.chains.episode_planner import EpisodePlanner
+from agents.autoAnimator.chains.episode_planner import EpisodePlanner
 
 
 class FakeModel:
@@ -81,8 +91,8 @@ class EpisodePlannerTests(unittest.TestCase):
             planner = EpisodePlanner(theme="mystery_adventure", art_style="cinematic anime")
 
             # patch get_model and tracked_generate to avoid external API
-            with mock.patch("agents.narrativeManga.chains.episode_planner.get_model", return_value=FakeModel()):
-                with mock.patch("agents.narrativeManga.chains.episode_planner.tracked_generate", side_effect=lambda tracker, model, prompt, purpose=None: FakeModel().generate_content(None)):
+            with mock.patch("agents.autoAnimator.chains.episode_planner.get_model", return_value=FakeModel()):
+                with mock.patch("agents.autoAnimator.chains.episode_planner.tracked_generate", side_effect=lambda tracker, model, prompt, purpose=None: FakeModel().generate_content(None)):
                     board = planner.run("", tmp_path)
 
             self.assertEqual(board["episode_number"], 1)

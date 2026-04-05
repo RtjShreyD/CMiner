@@ -22,12 +22,23 @@ from agents.shared.llm_tracker import LLMTracker
 router = APIRouter()
 ROOT_DIR = Path(__file__).resolve().parents[2]
 OUTPUTS_DIR = ROOT_DIR / "outputs"
-NARRATIVE_RUNNER = ROOT_DIR / "agents" / "narrativeManga" / "run.py"
+NARRATIVE_RUNNER = ROOT_DIR / "agents" / "autoAnimator" / "run.py"
 NARRATIVE_JOBS: dict[str, dict[str, Any]] = {}
 NARRATIVE_JOBS_LOCK = threading.Lock()
 STEP_HISTORY_STEPS = ("planner", "chars", "scenes", "audio", "texts", "music", "video")
 HASH_HISTORY_FILE = "workflow_hash_history.json"
 HASH_HISTORY_DIR = ".workflow_hash_snapshots"
+
+
+def _load_autoanimator_config() -> dict[str, Any]:
+    config_path = ROOT_DIR / "agents" / "autoAnimator" / "config.json"
+    if not config_path.exists():
+        return {}
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
 
 
 def _python_bin() -> str:
@@ -97,6 +108,7 @@ def _build_narrative_cmd(
 ) -> list[str]:
     cmd = [
         _python_bin(),
+        "-u",
         str(NARRATIVE_RUNNER),
         "--workspace",
         str(ROOT_DIR),
@@ -512,6 +524,7 @@ def _run_narrative_step_worker(job_id: str, req: Any, step: str, res: tuple[int,
                 continue
             stdout_lines.append(line)
             q.put({"type": "log", "msg": line})
+            print(f"[autoAnimator:{job_id}:stdout] {line}", flush=True)
             maybe = _extract_session_path_from_stdout(line)
             if maybe:
                 detected_session_path = maybe
@@ -524,6 +537,7 @@ def _run_narrative_step_worker(job_id: str, req: Any, step: str, res: tuple[int,
                 continue
             stderr_lines.append(line)
             q.put({"type": "error", "msg": line})
+            print(f"[autoAnimator:{job_id}:stderr] {line}", flush=True)
 
     t_out = threading.Thread(target=_drain_stdout, daemon=True)
     t_err = threading.Thread(target=_drain_stderr, daemon=True)
@@ -718,13 +732,7 @@ def _episode_board_path(session_dir: Path, episode: int | None = None) -> Path |
 
 
 def _resolve_art_style_and_resolution(session_dir: Path) -> tuple[str, tuple[int, int], str]:
-    config_path = ROOT_DIR / "agents" / "narrativeManga" / "config.json"
-    config: dict[str, Any] = {}
-    if config_path.exists():
-        try:
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-        except Exception:
-            config = {}
+    config = _load_autoanimator_config()
 
     state_path = session_dir / "session_state.json"
     settings: dict[str, Any] = {}
@@ -736,9 +744,16 @@ def _resolve_art_style_and_resolution(session_dir: Path) -> tuple[str, tuple[int
             settings = {}
 
     art_styles = config.get("art_styles", {}) if isinstance(config.get("art_styles", {}), dict) else {}
-    default_art_style = str(config.get("art_style", "cinematic anime"))
-    preset = settings.get("preset")
-    art_style = str(art_styles.get(preset, default_art_style))
+    style_keys = settings.get("style_keys") if isinstance(settings.get("style_keys"), list) else []
+    if style_keys:
+        resolved = [str(art_styles.get(str(k), "")).strip() for k in style_keys if str(art_styles.get(str(k), "")).strip()]
+        art_style = " + ".join(resolved) if resolved else ""
+    else:
+        preset = str(settings.get("preset", "") or "")
+        art_style = str(art_styles.get(preset, "")).strip()
+    if not art_style:
+        first_style = next(iter(art_styles.values()), "cinematic anime")
+        art_style = str(first_style)
 
     video_cfg = config.get("video", {}) if isinstance(config.get("video", {}), dict) else {}
     default_resolution = tuple(video_cfg.get("resolution", [1280, 720]))
@@ -900,9 +915,9 @@ def _sort_models_for_image(models: list[dict[str, Any]]) -> list[dict[str, Any]]
     )
 
 
-@router.get("/narrative/google-models")
+@router.get("/autoanimator/google-models")
 async def narrative_google_models() -> dict[str, Any]:
-    config_path = ROOT_DIR / "agents" / "narrativeManga" / "config.json"
+    config_path = ROOT_DIR / "agents" / "autoAnimator" / "config.json"
     defaults = {
         "planner_model": "models/gemini-flash-latest",
         "character_image_model": "models/gemini-2.5-flash-image",
@@ -984,7 +999,22 @@ async def narrative_google_models() -> dict[str, Any]:
     return _build_payload(models, "google")
 
 
-@router.get("/narrative/char-prompts")
+@router.get("/autoanimator/planner-options")
+async def autoanimator_planner_options() -> dict[str, Any]:
+    cfg = _load_autoanimator_config()
+    themes = cfg.get("themes", {}) if isinstance(cfg.get("themes", {}), dict) else {}
+    art_styles = cfg.get("art_styles", {}) if isinstance(cfg.get("art_styles", {}), dict) else {}
+    return {
+        "themes": themes,
+        "art_styles": art_styles,
+        "defaults": {
+            "theme": "auto-select",
+            "preset": "auto-select",
+        },
+    }
+
+
+@router.get("/autoanimator/char-prompts")
 async def narrative_char_prompts(session_path: str, episode: int | None = None) -> dict[str, Any]:
     session_dir = _resolve_session_dir(session_path)
     board_path = _episode_board_path(session_dir, episode)
@@ -1011,7 +1041,7 @@ async def narrative_char_prompts(session_path: str, episode: int | None = None) 
     }
 
 
-@router.get("/narrative/locks")
+@router.get("/autoanimator/locks")
 async def narrative_get_locks(session_path: str) -> dict[str, Any]:
     path = _locks_file(session_path)
     if not path.exists():
@@ -1019,14 +1049,14 @@ async def narrative_get_locks(session_path: str) -> dict[str, Any]:
     return {"session_path": session_path, "locks": json.loads(path.read_text(encoding="utf-8"))}
 
 
-@router.post("/narrative/locks")
+@router.post("/autoanimator/locks")
 async def narrative_set_locks(req: SessionLocksRequest) -> dict[str, Any]:
     path = _locks_file(req.session_path)
     path.write_text(json.dumps(req.locks, indent=2), encoding="utf-8")
     return {"ok": True, "session_path": req.session_path, "locks": req.locks}
 
 
-@router.post("/narrative/session-sync")
+@router.post("/autoanimator/session-sync")
 async def narrative_sync_session_state(req: SessionStateSyncRequest) -> dict[str, Any]:
     session_dir = _resolve_session_dir(req.session_path)
     state_path = session_dir / "session_state.json"
@@ -1062,7 +1092,12 @@ async def narrative_sync_session_state(req: SessionStateSyncRequest) -> dict[str
 
 @router.post("/run")
 async def start_agent_run(req: RunAgentRequest):
-    if req.agent_name != "narrativeManga":
+    deprecation_warning = None
+    if req.agent_name == "narrativeManga":
+        deprecation_warning = "'narrativeManga' is deprecated; use 'AutoAnimator'."
+        req.agent_name = "AutoAnimator"
+
+    if req.agent_name != "AutoAnimator":
         return {"status": "queued", "job_id": "test-job-123", "agent": req.agent_name}
 
     run = _run_narrative_step(
@@ -1085,8 +1120,9 @@ async def start_agent_run(req: RunAgentRequest):
 
     return {
         "status": "success" if run["exit_code"] == 0 else "error",
-        "job_id": "narrative-sync-run",
+        "job_id": "autoanimator-sync-run",
         "agent": req.agent_name,
+        "deprecation_warning": deprecation_warning,
         "exit_code": run["exit_code"],
         "session_path": run["session_path"],
         "stdout": run["stdout"],
@@ -1094,7 +1130,7 @@ async def start_agent_run(req: RunAgentRequest):
     }
 
 
-@router.get("/narrative/checkpoints")
+@router.get("/autoanimator/checkpoints")
 async def narrative_checkpoints(session_path: str) -> dict[str, Any]:
     session_dir = _resolve_session_dir(session_path)
     return {
@@ -1104,7 +1140,7 @@ async def narrative_checkpoints(session_path: str) -> dict[str, Any]:
     }
 
 
-@router.get("/narrative/hash-history")
+@router.get("/autoanimator/hash-history")
 async def narrative_hash_history(session_path: str) -> dict[str, Any]:
     session_dir = _resolve_session_dir(session_path)
     return {
@@ -1113,7 +1149,7 @@ async def narrative_hash_history(session_path: str) -> dict[str, Any]:
     }
 
 
-@router.post("/narrative/revert-hash")
+@router.post("/autoanimator/revert-hash")
 async def narrative_revert_hash(req: RestoreHashRequest) -> dict[str, Any]:
     session_dir = _resolve_session_dir(req.session_path)
 
@@ -1136,7 +1172,7 @@ async def narrative_revert_hash(req: RestoreHashRequest) -> dict[str, Any]:
     }
 
 
-@router.post("/narrative/run-step")
+@router.post("/autoanimator/run-step")
 async def narrative_run_step(req: RunNarrativeStepRequest) -> dict[str, Any]:
     step_map = {
         "texts": "clouds",
@@ -1230,7 +1266,7 @@ async def narrative_run_step(req: RunNarrativeStepRequest) -> dict[str, Any]:
     }
 
 
-@router.post("/narrative/run-step-live")
+@router.post("/autoanimator/run-step-live")
 async def narrative_run_step_live(req: RunNarrativeStepRequest) -> dict[str, Any]:
     step_map = {
         "texts": "clouds",
@@ -1271,7 +1307,7 @@ async def narrative_run_step_live(req: RunNarrativeStepRequest) -> dict[str, Any
     }
     res = resolution_map.get(req.buildpack_resolution or "", None)
 
-    job_id = f"narrative-step-{uuid.uuid4().hex[:12]}"
+    job_id = f"autoanimator-step-{uuid.uuid4().hex[:12]}"
     _create_job(job_id)
     worker = threading.Thread(target=_run_narrative_step_worker, args=(job_id, req, step, res), daemon=True)
     worker.start()
@@ -1279,7 +1315,7 @@ async def narrative_run_step_live(req: RunNarrativeStepRequest) -> dict[str, Any
     return {"done": False, "job_id": job_id}
 
 
-@router.get("/narrative/job/{job_id}")
+@router.get("/autoanimator/job/{job_id}")
 async def narrative_job_status(job_id: str) -> dict[str, Any]:
     state = _job_state(job_id)
     if not state:
@@ -1287,7 +1323,7 @@ async def narrative_job_status(job_id: str) -> dict[str, Any]:
     return {"done": state["done"], "result": state["result"]}
 
 
-@router.post("/narrative/copy-character")
+@router.post("/autoanimator/copy-character")
 async def narrative_copy_character(req: CopyCharacterRequest) -> dict[str, Any]:
     source_rel = req.source_path.lstrip("/")
     if source_rel.startswith("outputs/"):
@@ -1300,7 +1336,7 @@ async def narrative_copy_character(req: CopyCharacterRequest) -> dict[str, Any]:
         target_session_dir = _resolve_session_dir(req.target_session_path)
     else:
         new_sid = str(random.randint(1_000_000, 9_999_999))
-        target_session_dir = OUTPUTS_DIR / f"{new_sid}" / "narrativeManga"
+        target_session_dir = OUTPUTS_DIR / f"{new_sid}" / "AutoAnimator"
         target_session_dir.mkdir(parents=True, exist_ok=True)
 
     target_chars = target_session_dir / "chars"
@@ -1315,7 +1351,7 @@ async def narrative_copy_character(req: CopyCharacterRequest) -> dict[str, Any]:
     }
 
 
-@router.post("/narrative/redo-char")
+@router.post("/autoanimator/redo-char")
 async def narrative_redo_single_char(req: RedoSingleCharRequest) -> dict[str, Any]:
     session_dir = _resolve_session_dir(req.session_path)
     board_path = _episode_board_path(session_dir, req.episode)
@@ -1347,7 +1383,7 @@ async def narrative_redo_single_char(req: RedoSingleCharRequest) -> dict[str, An
     char_path = session_dir / "chars" / f"char_{char_safe}.png"
     char_path.unlink(missing_ok=True)
 
-    from agents.narrativeManga.chains.char_gen import CharGen
+    from agents.autoAnimator.chains.char_gen import CharGen
 
     gen = CharGen(
         image_model_name=model_name,

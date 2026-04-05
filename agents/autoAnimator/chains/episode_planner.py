@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from agents.narrativeManga.utils import get_model
+from agents.autoAnimator.utils import get_model
 from agents.shared.llm_tracker import LLMTracker, tracked_generate
 
 
@@ -22,6 +22,7 @@ class EpisodePlanner:
         max_chars: int = 5,
         max_panels: int = 15,
         art_style: str = "cinematic anime",
+        aesthetic_guidance: str = "",
         theme: str = None,
         episode_mode: bool = True,
         target_episode: int | None = None,
@@ -33,6 +34,7 @@ class EpisodePlanner:
         self.max_chars = max_chars
         self.max_panels = max_panels
         self.art_style = art_style
+        self.aesthetic_guidance = aesthetic_guidance or ""
         self.theme = theme
         self.episode_mode = episode_mode
         self.target_episode = target_episode
@@ -115,11 +117,14 @@ class EpisodePlanner:
 
         theme_text = f"THEME: {self.theme}\n" if self.theme else ""
 
+        aesthetic_text = f"AESTHETIC DIRECTION: {self.aesthetic_guidance}\n" if self.aesthetic_guidance else ""
+
         prompt = (
             f"You are a master manga storyboard artist and narrative designer.\n\n"
             f"BASE STORY PREMISE:\n{base_prompt}\n"
             f"{theme_text}"
             f"DEFAULT ART STYLE: {self.art_style}\n"
+            f"{aesthetic_text}"
             f"{prior_context}\n"
             f"EPISODE TYPE:\n{episode_type}\n"
             f"INSTRUCTIONS:\n"

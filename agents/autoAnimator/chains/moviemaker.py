@@ -23,6 +23,7 @@ class MovieMaker:
         scenes_manifest: Dict[str, str],
         audio_files: List[str],
         session_dir: Path,
+        output_suffix: str = "",
     ) -> Path:
         print("--- Pipeline: Movie Maker ---")
         frames_dir = session_dir / "frames"
@@ -117,10 +118,11 @@ class MovieMaker:
             for sp in seg_paths:
                 f.write(f"file '{sp.name}'\n")
 
-        title = manga_board.get("episode_title", "NarrativeManga")
+        title = manga_board.get("episode_title", "AutoAnimator")
         safe_title = title.replace(" ", "_").replace(":", "").replace("'", "")
         ep_num = manga_board.get("episode_number", 1)
-        final_name = f"Episode{ep_num}_{safe_title}.mp4"
+        suffix = f"_{output_suffix}" if output_suffix else ""
+        final_name = f"Episode{ep_num}_{safe_title}{suffix}.mp4"
         final_path = session_dir / final_name
 
         subprocess.run(
@@ -172,17 +174,19 @@ class MovieMaker:
         # metadata
         metadata = {
             "episode": manga_board.get("episode_number", 1),
-            "title": manga_board.get("episode_title", "NarrativeManga"),
+            "title": manga_board.get("episode_title", "AutoAnimator"),
             "final_video": str(final_path),
             "thumbnail": str(thumb_path),
             "resolution": f"{self.resolution[0]}x{self.resolution[1]}",
             "fps": self.fps,
+            "output_suffix": output_suffix,
             "music_attached": bool(self.enable_music and (session_dir / "music").exists()),
         }
-        with open(session_dir / "metadata.json", "w") as f:
+        metadata_name = f"metadata_{output_suffix}.json" if output_suffix else "metadata.json"
+        with open(session_dir / metadata_name, "w") as f:
             json.dump(metadata, f, indent=2)
 
         print(f"Final video rendered: {final_path}")
         print(f"Thumbnail saved: {thumb_path}")
-        print(f"Metadata saved: {session_dir / 'metadata.json'}")
+        print(f"Metadata saved: {session_dir / metadata_name}")
         return final_path

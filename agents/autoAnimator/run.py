@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NarrativeManga Pipeline Runner – Episodic video generation with state management."""
+"""AutoAnimator Pipeline Runner – Episodic video generation with state management."""
 
 import argparse
 import sys
@@ -8,12 +8,146 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
-from agents.narrativeManga.utils import ensure_session_outputs, get_model
+from agents.autoAnimator.utils import ensure_session_outputs, get_model
 from agents.shared.llm_tracker import LLMTracker
 
 
+def _first_key(mapping: dict) -> str | None:
+    for k in mapping.keys():
+        return str(k)
+    return None
+
+
+def _parse_json_object(raw: str) -> dict:
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return {}
+    try:
+        parsed = json.loads(raw[start : end + 1])
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _auto_select_theme_and_styles(
+    *,
+    model_name: str,
+    base_prompt: str,
+    themes: dict[str, str],
+    art_styles: dict[str, str],
+    tracker: LLMTracker,
+) -> tuple[str | None, list[str]]:
+    if not themes and not art_styles:
+        return None, []
+
+    model = get_model(model_name)
+    prompt = (
+        "You are selecting generation aesthetics for an episodic visual story pipeline.\n"
+        "Choose exactly ONE theme key and ONE OR TWO art_style keys from the provided options.\n"
+        "Rules:\n"
+        "- Return ONLY strict JSON.\n"
+        "- theme_key must be one key from theme_options.\n"
+        "- style_keys must contain one or two keys from art_style_options.\n"
+        "- Prefer one style unless combining two gives a clearly better fit for the prompt.\n\n"
+        f"USER_PROMPT:\n{base_prompt}\n\n"
+        f"theme_options: {json.dumps(themes, ensure_ascii=True)}\n"
+        f"art_style_options: {json.dumps(art_styles, ensure_ascii=True)}\n\n"
+        "Return JSON in this shape:\n"
+        "{\n"
+        "  \"theme_key\": \"one_theme_key\",\n"
+        "  \"style_keys\": [\"style_key_1\", \"style_key_2_optional\"]\n"
+        "}"
+    )
+
+    try:
+        from agents.shared.llm_tracker import tracked_generate
+
+        response = tracked_generate(tracker, model, prompt, purpose="style_theme_selector")
+        obj = _parse_json_object(getattr(response, "text", "") or "")
+    except Exception:
+        obj = {}
+
+    chosen_theme = str(obj.get("theme_key", "")).strip() if isinstance(obj.get("theme_key"), str) else ""
+    raw_styles = obj.get("style_keys") if isinstance(obj.get("style_keys"), list) else []
+
+    style_keys: list[str] = []
+    for item in raw_styles:
+        key = str(item).strip()
+        if key in art_styles and key not in style_keys:
+            style_keys.append(key)
+        if len(style_keys) >= 2:
+            break
+
+    if chosen_theme not in themes:
+        chosen_theme = _first_key(themes) or ""
+
+    if not style_keys:
+        default_style = _first_key(art_styles)
+        style_keys = [default_style] if default_style else []
+
+    return (chosen_theme or None), style_keys
+
+
+def _resolve_art_style_text(style_keys: list[str], art_styles: dict[str, str]) -> str:
+    resolved = [art_styles[k] for k in style_keys if k in art_styles]
+    if not resolved:
+        fallback_key = _first_key(art_styles)
+        if fallback_key:
+            return str(art_styles[fallback_key])
+        return "cinematic anime"
+    # Auto mode may combine up to two styles.
+    return " + ".join(resolved)
+
+
+def _build_aesthetic_guidance(
+    *,
+    model_name: str,
+    base_prompt: str,
+    resolved_theme: str | None,
+    selected_style_keys: list[str],
+    art_styles: dict[str, str],
+    tracker: LLMTracker,
+    auto_mode: bool,
+) -> str:
+    style_text = "; ".join([art_styles.get(k, k) for k in selected_style_keys if k])
+    fallback = (
+        f"Theme mood: {resolved_theme or 'none'}. "
+        f"Style blend: {style_text or 'cinematic anime'}. "
+        "Keep cinematic composition, coherent lighting, texture continuity, and character identity consistency across panels."
+    )
+
+    if not auto_mode:
+        return fallback
+
+    model = get_model(model_name)
+    prompt = (
+        "You are a visual direction lead for episodic animation frames.\n"
+        "Create a concise AESTHETIC_GUIDANCE string for image generation prompts.\n"
+        "Rules:\n"
+        "- You MAY remix and blend the selected styles; do not just repeat key names.\n"
+        "- Keep it under 80 words.\n"
+        "- Include: palette, lighting, composition rhythm, texture detail, and mood continuity.\n"
+        "- Output JSON only: {\"aesthetic_guidance\": \"...\"}.\n\n"
+        f"STORY_PROMPT:\n{base_prompt}\n\n"
+        f"THEME_TEXT:\n{resolved_theme or 'none'}\n\n"
+        f"SELECTED_STYLE_KEYS:\n{json.dumps(selected_style_keys, ensure_ascii=True)}\n"
+        f"SELECTED_STYLE_TEXT:\n{style_text}\n"
+    )
+
+    try:
+        from agents.shared.llm_tracker import tracked_generate
+
+        response = tracked_generate(tracker, model, prompt, purpose="aesthetic_guidance")
+        obj = _parse_json_object(getattr(response, "text", "") or "")
+        guidance = str(obj.get("aesthetic_guidance", "")).strip()
+        return guidance or fallback
+    except Exception:
+        return fallback
+
+
 def main():
-    parser = argparse.ArgumentParser(description="NarrativeManga Pipeline Runner")
+    parser = argparse.ArgumentParser(description="AutoAnimator Pipeline Runner")
     parser.add_argument("--workspace", default=".", help="Workspace root")
     parser.add_argument("--prompt", help="Override base prompt (otherwise reads prompt.txt)")
     parser.add_argument(
@@ -119,20 +253,54 @@ def main():
         scene_image_model = args.scene_image_model
     tts_voices_pool = config.get("tts_voices_pool", {})
 
+    base_prompt = args.prompt or ""
+    if not base_prompt:
+        prompt_file = Path(__file__).resolve().parent / "prompt.txt"
+        if prompt_file.exists():
+            base_prompt = prompt_file.read_text().strip()
+            print(f"Loaded base prompt from {prompt_file}")
+        else:
+            base_prompt = "A dramatic manga story."
+
     # Style/theme presets
     themes = config.get("themes", {})
     art_styles = config.get("art_styles", {})
     output_presets = config.get("output_presets", {})
-    resolved_theme = themes.get(args.theme, args.theme) if args.theme else None
 
-    base_prompt = args.prompt or ""
-    if args.theme and args.theme in themes and not base_prompt:
-        base_prompt = themes[args.theme]
+    requested_theme = (args.theme or "").strip()
+    requested_preset = (args.preset or "").strip()
+    auto_theme = requested_theme in {"", "auto-select"}
+    auto_preset = requested_preset in {"", "auto-select"}
 
-    if args.preset and args.preset in art_styles:
-        art_style = art_styles[args.preset]
+    if auto_theme or auto_preset:
+        selected_theme_key, selected_style_keys = _auto_select_theme_and_styles(
+            model_name=planner_model,
+            base_prompt=base_prompt,
+            themes=themes if isinstance(themes, dict) else {},
+            art_styles=art_styles if isinstance(art_styles, dict) else {},
+            tracker=tracker,
+        )
     else:
-        art_style = config.get("art_style", "cinematic anime")
+        selected_theme_key = requested_theme if requested_theme in themes else None
+        selected_style_keys = [requested_preset] if requested_preset in art_styles else []
+
+    if not selected_theme_key:
+        selected_theme_key = _first_key(themes)
+    if not selected_style_keys:
+        default_style_key = _first_key(art_styles)
+        selected_style_keys = [default_style_key] if default_style_key else []
+
+    resolved_theme = themes.get(selected_theme_key) if selected_theme_key else None
+    art_style = _resolve_art_style_text(selected_style_keys, art_styles if isinstance(art_styles, dict) else {})
+    aesthetic_guidance = _build_aesthetic_guidance(
+        model_name=planner_model,
+        base_prompt=base_prompt,
+        resolved_theme=resolved_theme,
+        selected_style_keys=selected_style_keys,
+        art_styles=art_styles if isinstance(art_styles, dict) else {},
+        tracker=tracker,
+        auto_mode=(auto_theme or auto_preset),
+    )
 
     video_config = config.get("video", {})
     resolution = tuple(video_config.get("resolution", [1280, 720]))
@@ -150,14 +318,6 @@ def main():
     enable_music = args.enable_music
     vector_upscale = args.vector_upscale
 
-    if not base_prompt:
-        prompt_file = Path(__file__).resolve().parent / "prompt.txt"
-        if prompt_file.exists():
-            base_prompt = prompt_file.read_text().strip()
-            print(f"Loaded base prompt from {prompt_file}")
-        else:
-            base_prompt = "A dramatic manga story."
-
     # ── State Management ──────────────────────────────────────
     state_path = session_dir / "session_state.json"
     state = _load_state(state_path)
@@ -166,8 +326,12 @@ def main():
         "prompt": base_prompt,
         "episodes_mode": args.episodes,
         "episode": args.episode,
-        "theme": args.theme,
-        "preset": args.preset,
+        "theme": selected_theme_key,
+        "preset": selected_style_keys[0] if selected_style_keys else None,
+        "style_keys": selected_style_keys,
+        "theme_selection_mode": "auto" if auto_theme else "manual",
+        "style_selection_mode": "auto" if auto_preset else "manual",
+        "aesthetic_guidance": aesthetic_guidance,
         "format": args.format,
         "planner_model": planner_model,
         "character_image_model": char_image_model,
@@ -193,6 +357,9 @@ def main():
 
     print(f"Session: {session_dir}")
     print(f"Config: fps={fps}, max_image_requests={max_image_requests}, max_chars={max_chars}")
+    print(f"Theme selected: {selected_theme_key or 'none'}")
+    print(f"Style keys selected: {', '.join(selected_style_keys) if selected_style_keys else 'none'}")
+    print(f"Aesthetic guidance: {aesthetic_guidance}")
 
     # ── Determine what to run ─────────────────────────────────
     # --episodes continue: plan-only by default
@@ -205,7 +372,7 @@ def main():
     # ── 1. Episode Planner ────────────────────────────────────
     manga_board = None
     if run_planner and not run_specific_step:
-        from agents.narrativeManga.chains.episode_planner import EpisodePlanner
+        from agents.autoAnimator.chains.episode_planner import EpisodePlanner
 
         planner = EpisodePlanner(
             model_name=planner_model,
@@ -214,6 +381,7 @@ def main():
             max_chars=max_chars,
             max_panels=max_panels,
             art_style=art_style,
+            aesthetic_guidance=aesthetic_guidance,
             theme=resolved_theme,
             episode_mode=(args.episode_mode == "true"),
             target_episode=args.episode,
@@ -257,13 +425,14 @@ def main():
     chars_manifest_path = session_dir / "chars" / "chars_manifest.json"
     char_manifest = {}
     if args.step in ["all", "chars"] or (run_generation and not run_specific_step):
-        from agents.narrativeManga.chains.char_gen import CharGen
+        from agents.autoAnimator.chains.char_gen import CharGen
 
         char_gen = CharGen(
             image_model_name=char_image_model,
             max_generations=char_budget,
             resolution=resolution,
             art_style=art_style,
+            aesthetic_guidance=aesthetic_guidance,
             tracker=tracker,
         )
         char_manifest = char_gen.run(manga_board, session_dir)
@@ -277,13 +446,14 @@ def main():
     scenes_manifest_path = session_dir / "scenes" / "scenes_manifest.json"
     scenes_manifest = {}
     if args.step in ["all", "scenes"] or (run_generation and not run_specific_step):
-        from agents.narrativeManga.chains.scene_gen import SceneGen
+        from agents.autoAnimator.chains.scene_gen import SceneGen
 
         scene_gen = SceneGen(
             image_model_name=scene_image_model,
             max_generations=scene_budget,
             resolution=resolution,
             art_style=art_style,
+            aesthetic_guidance=aesthetic_guidance,
             tracker=tracker,
         )
         scenes_manifest = scene_gen.run(manga_board, char_manifest, session_dir)
@@ -297,7 +467,7 @@ def main():
     audio_dir = session_dir / "audio"
     audio_files = []
     if args.step in ["all", "audio"] or (run_generation and not run_specific_step):
-        from agents.narrativeManga.chains.tts_gen import TTSGen
+        from agents.autoAnimator.chains.tts_gen import TTSGen
 
         tts_gen = TTSGen(voices_pool=tts_voices_pool)
         audio_files = tts_gen.run(manga_board, session_dir)
@@ -311,7 +481,7 @@ def main():
 
     # ── 5. Cloud Generation (OpenCV – no LLM) ────────────────
     if args.step in ["all", "clouds"] or (run_generation and not run_specific_step):
-        from agents.narrativeManga.chains.cloud_gen import CloudGen
+        from agents.autoAnimator.chains.cloud_gen import CloudGen
 
         settings = state.get("settings", {})
         cloud_gen = CloudGen(
@@ -330,7 +500,7 @@ def main():
     # ── 6. Music Generation (optional) ───────────────────────
     if args.step in ["all", "music"] or (run_generation and not run_specific_step):
         if enable_music:
-            from agents.narrativeManga.chains.music_gen import MusicGen
+            from agents.autoAnimator.chains.music_gen import MusicGen
 
             music_gen = MusicGen(
                 model_name=planner_model,
@@ -348,7 +518,7 @@ def main():
 
     # ── 7. Movie Maker ────────────────────────────────────────
     if args.step in ["all", "video"] or (run_generation and not run_specific_step):
-        from agents.narrativeManga.chains.moviemaker import MovieMaker
+        from agents.autoAnimator.chains.moviemaker import MovieMaker
 
         if not scenes_manifest and scenes_manifest_path.exists():
             with open(scenes_manifest_path, "r") as f:
@@ -361,14 +531,34 @@ def main():
 
         maker = MovieMaker(fps=fps, resolution=resolution, enable_music=enable_music)
         final_video = maker.run(manga_board, scenes_manifest, audio_files, session_dir)
+        rendered_videos = [str(final_video)] if final_video else []
+
+        # When YouTube Video is selected, also export a Shorts variant by default.
+        if args.format == "youtube_widescreen" and output_presets.get("youtube_shorts"):
+            shorts_cfg = output_presets.get("youtube_shorts", {})
+            shorts_resolution = tuple(shorts_cfg.get("resolution", [1080, 1920]))
+            shorts_fps = int(shorts_cfg.get("fps", fps))
+            shorts_maker = MovieMaker(fps=shorts_fps, resolution=shorts_resolution, enable_music=enable_music)
+            shorts_video = shorts_maker.run(
+                manga_board,
+                scenes_manifest,
+                audio_files,
+                session_dir,
+                output_suffix="youtube_shorts",
+            )
+            if shorts_video:
+                rendered_videos.append(str(shorts_video))
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["status"] = "complete"
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["video"] = str(final_video)
+        state.setdefault("episodes", {}).setdefault(str(ep_num), {})["videos"] = rendered_videos
         _save_state(state_path, state)
 
         if vector_upscale:
             print("Vector upscale requested, stub behavior: upscaling is not yet implemented.")
 
         print(f"Task Complete. Final Output: {final_video}")
+        if len(rendered_videos) > 1:
+            print(f"Additional outputs: {rendered_videos[1:]}")
     elif run_specific_step:
         print(f"Step '{args.step}' complete in {session_dir}")
 

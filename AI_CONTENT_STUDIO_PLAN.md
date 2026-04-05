@@ -5,7 +5,7 @@ This document outlines the architecture, tooling, and development phases require
 ## 1. Core Vision & Requirements
 - **Unified TUI**: A beautiful, responsive terminal interface to replace standard terminal outputs.
 - **Multimodal Media Viewing**: Ability to preview images, listen to generated TTS, and watch final MP4 renders directly inside or launched from the terminal.
-- **Agent & Session Management**: A dashboard to switch between agents (NarrativeManga, Newsdesk, Podcasting), view historical sessions, and resume interrupted pipelines.
+- **Agent & Session Management**: A dashboard to switch between agents (AutoAnimator, Newsdesk, Podcasting), view historical sessions, and resume interrupted pipelines.
 - **Asynchronous & Scheduled Execution**: Run pipelines in the background, run multiple agents in parallel, and schedule tasks (e.g., "Run Newsdesk every morning at 6 AM").
 - **Basic A/V Editing**: Trim, concatenate, or mute clips directly from the TUI before finalizing the stitch.
 
@@ -49,7 +49,7 @@ The application will launch via `cminer` or `python3 main.py --tui`.
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ CMINER STUDIO ⚡ 1 Active Job    [Dashboard] [Agents] [Media] [Config]   │
 ├───────────────┬─────────────────────────────────────────────────────────┤
-│ 📂 SESSIONS   │ 🎬 AGENT: NarrativeManga                                |
+│ 📂 SESSIONS   │ 🎬 AGENT: AutoAnimator                                |
 │ ▼ manga_001   │                                                         │
 │   ├─ chars    │  Status: [|||||||||||||||||||      ] 70% Scene Gen      │
 │   ├─ scenes   │  Budget: 12/50 Images Used                              │

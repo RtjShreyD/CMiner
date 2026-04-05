@@ -78,8 +78,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     manga_parser = subparsers.add_parser(
-        "narrativeManga",
-        help="Run NarrativeManga episodic video pipeline",
+        "AutoAnimator",
+        help="Run AutoAnimator episodic video pipeline",
         description="Generate episodic manga-style videos with multi-character support",
     )
     manga_parser.add_argument("--workspace", default=".", help="Workspace root")
@@ -205,7 +205,7 @@ def _run_podcasting(
     return proc.returncode
 
 
-def _run_narrative_manga(
+def _run_auto_animator(
     workspace: str,
     prompt: str | None,
     step: str = "all",
@@ -214,7 +214,7 @@ def _run_narrative_manga(
     episodes: str = "new",
     develop: bool = False,
 ) -> int:
-    runner_script = ROOT / "agents" / "narrativeManga" / "run.py"
+    runner_script = ROOT / "agents" / "AutoAnimator" / "run.py"
 
     cmd = [
         sys.executable,
@@ -268,12 +268,12 @@ def _run_char_gen(
 
 def main() -> None:
     parser = _build_parser()
-    args = parser.parse_args(sys.argv[1:])
-
-    if args.command == "studio":
-        from studio.app import CMinerStudioApp
-        CMinerStudioApp().run()
-        return
+    argv = sys.argv[1:]
+    if argv and argv[0] == "narrativeManga":
+        # Backward-compatibility shim while narrativeManga is deprecated.
+        print("[DEPRECATED] 'narrativeManga' is deprecated; use 'AutoAnimator' instead.", file=sys.stderr)
+        argv[0] = "AutoAnimator"
+    args = parser.parse_args(argv)
 
     if args.command == "openclaw":
         raise SystemExit(_run_openclaw_passthrough(args.openclaw_args))
@@ -307,9 +307,9 @@ def main() -> None:
             )
         )
 
-    if args.command == "narrativeManga":
+    if args.command == "AutoAnimator":
         raise SystemExit(
-            _run_narrative_manga(
+            _run_auto_animator(
                 workspace=args.workspace,
                 prompt=args.prompt,
                 step=args.step,

@@ -13,10 +13,10 @@ const AGENTS_LIST = [
   { id: 'autoAnimator', name: 'AutoAnimator', desc: 'Focused preview-driven animator powered by Narrative Manga backend.' },
 ];
 const EXECUTION_AGENT_BY_UI_AGENT = {
-  autoAnimator: 'narrativeManga',
+  autoAnimator: 'AutoAnimator',
 };
 const VALID_AGENT_IDS = new Set(AGENTS_LIST.map((a) => a.id));
-const AUTOANIMATOR_TEMPLATE_SESSION = '1392763/narrativeManga';
+const AUTOANIMATOR_TEMPLATE_SESSION = '1392763/AutoAnimator';
 const DEFAULT_SECTION_LOCKS = {
   step0: true,
   planner: true,
@@ -83,8 +83,11 @@ export default function Agents() {
   const [sessionChars, setSessionChars] = useState([]);
 
   const [narrativePrompt, setNarrativePrompt] = useState('A sci-fi detective embarks on a neon city mystery.');
-  const [preset, setPreset] = useState('cinematic_anime');
-  const [format, setFormat] = useState('tiktok');
+  const [theme, setTheme] = useState('auto-select');
+  const [preset, setPreset] = useState('auto-select');
+  const [plannerThemes, setPlannerThemes] = useState({});
+  const [plannerArtStyles, setPlannerArtStyles] = useState({});
+  const [format, setFormat] = useState('youtube_widescreen');
   const [cloudStyle, setCloudStyle] = useState('cloud-fluffy-default');
   const [fontStyle, setFontStyle] = useState('font-inter-clean');
   const [subtitleStyle, setSubtitleStyle] = useState('subtitle-neon-clean');
@@ -208,6 +211,19 @@ export default function Agents() {
     setRunning(false);
   };
 
+  const goBackToAgentSelector = () => {
+    setPage('selector');
+    setSessionMode('new');
+    setSessionPath('');
+    navigate('/agents');
+  };
+
+  const startNewSessionFromWorkspace = () => {
+    setSessionMode('new');
+    setSessionPath('');
+    goToAgentWorkspace(selectedAgent, 'new');
+  };
+
   const handleTreeItemClick = (item) => {
     if (item.is_dir) {
       setSelectedFile(null);
@@ -226,7 +242,7 @@ export default function Agents() {
       return;
     }
     try {
-      const res = await axios.get(`${API_BASE}/agents/narrative/checkpoints`, { params: { session_path: path } });
+      const res = await axios.get(`${API_BASE}/agents/autoanimator/checkpoints`, { params: { session_path: path } });
       setWorkflowHashes(res.data?.hashes || {});
       setWorkflowHistory(res.data?.history || {});
     } catch {
@@ -237,6 +253,7 @@ export default function Agents() {
 
   const applyTemplateSettings = (settings = {}) => {
     if (typeof settings?.prompt === 'string' && settings.prompt.trim()) setNarrativePrompt(settings.prompt);
+    if (typeof settings?.theme === 'string' && settings.theme.trim()) setTheme(settings.theme);
     if (typeof settings?.preset === 'string' && settings.preset.trim()) setPreset(settings.preset);
     if (typeof settings?.format === 'string' && settings.format.trim()) setFormat(settings.format);
     if (typeof settings?.planner_model === 'string' && settings.planner_model.trim()) setPlannerModel(settings.planner_model);
@@ -278,7 +295,7 @@ export default function Agents() {
     setHashRevertBusy(step);
     setBuildpackSaveMessage('');
     try {
-      const res = await axios.post(`${API_BASE}/agents/narrative/revert-hash`, {
+      const res = await axios.post(`${API_BASE}/agents/autoanimator/revert-hash`, {
         session_path: sessionPath,
         step,
         hash,
@@ -306,7 +323,7 @@ export default function Agents() {
     prompt: narrativePrompt,
     episodes_mode: episodesMode,
     episode: targetEpisode ? parseInt(targetEpisode, 10) : null,
-    theme: null,
+    theme,
     preset,
     format,
     planner_model: plannerModel,
@@ -364,7 +381,7 @@ export default function Agents() {
       const isExisting = sessionMode === 'existing' || Boolean(sessionPath);
       if (isExisting && sessionPath) {
         try {
-          await axios.post(`${API_BASE}/agents/narrative/session-sync`, {
+          await axios.post(`${API_BASE}/agents/autoanimator/session-sync`, {
             session_path: sessionPath,
             settings: buildSessionSettingsSnapshot(),
             locks: sectionLocks,
@@ -382,6 +399,7 @@ export default function Agents() {
         reset: opts?.redo ? true : Boolean(stepReset[step]),
         redo: Boolean(opts?.redo),
         prompt: narrativePrompt,
+        theme,
         episodes: effectiveEpisodesMode,
         episode: targetEpisode ? parseInt(targetEpisode, 10) : null,
         preset,
@@ -411,7 +429,7 @@ export default function Agents() {
         max_episode_duration_mins: maxEpisodeDurationMins,
       };
 
-      const start = await axios.post(`${API_BASE}/agents/narrative/run-step-live`, payload);
+      const start = await axios.post(`${API_BASE}/agents/autoanimator/run-step-live`, payload);
 
       if (start.data?.done && start.data?.result) {
         const instant = start.data.result;
@@ -438,7 +456,7 @@ export default function Agents() {
       for (;;) {
         // Poll final structured result while websocket streams console lines.
         await new Promise((resolve) => setTimeout(resolve, 500));
-        const statusRes = await axios.get(`${API_BASE}/agents/narrative/job/${currentJobId}`);
+        const statusRes = await axios.get(`${API_BASE}/agents/autoanimator/job/${currentJobId}`);
         if (statusRes.data?.done) {
           finalRes = statusRes.data?.result || {};
           break;
@@ -489,7 +507,7 @@ export default function Agents() {
     if (!sourceCharPath) return;
     try {
       const target = sessionPath || null;
-      const res = await axios.post(`${API_BASE}/agents/narrative/copy-character`, {
+      const res = await axios.post(`${API_BASE}/agents/autoanimator/copy-character`, {
         source_path: sourceCharPath,
         target_session_path: target,
       });
@@ -513,7 +531,7 @@ export default function Agents() {
     setLogs((prev) => [...prev, { type: 'info', msg: `Single-char redo started: ${item.name}` }]);
     try {
       try {
-        await axios.post(`${API_BASE}/agents/narrative/session-sync`, {
+        await axios.post(`${API_BASE}/agents/autoanimator/session-sync`, {
           session_path: sessionPath,
           settings: buildSessionSettingsSnapshot(),
           locks: sectionLocks,
@@ -522,7 +540,7 @@ export default function Agents() {
         // Continue even if state sync fails.
       }
 
-      const res = await axios.post(`${API_BASE}/agents/narrative/redo-char`, {
+      const res = await axios.post(`${API_BASE}/agents/autoanimator/redo-char`, {
         session_path: sessionPath,
         char_name: item.name,
         visual_prompt: item.visual_prompt,
@@ -677,9 +695,16 @@ export default function Agents() {
         const parsed = JSON.parse(raw);
         const settings = parsed?.settings || {};
         applyTemplateSettings(settings);
+        setFormat('youtube_widescreen');
+        // New sessions default to LLM auto-selection for aesthetics.
+        setTheme('auto-select');
+        setPreset('auto-select');
         setSectionLocks({ ...DEFAULT_SECTION_LOCKS });
       } catch {
         // Keep built-in defaults if template session is unavailable.
+        setFormat('youtube_widescreen');
+        setTheme('auto-select');
+        setPreset('auto-select');
       }
     };
     loadTemplateDefaultsForNewSession();
@@ -721,6 +746,7 @@ export default function Agents() {
         }
 
         if (typeof settings?.preset === 'string' && settings.preset.trim()) setPreset(settings.preset);
+        if (typeof settings?.theme === 'string' && settings.theme.trim()) setTheme(settings.theme);
         if (typeof settings?.planner_model === 'string' && settings.planner_model.trim()) setPlannerModel(settings.planner_model);
         if (typeof settings?.character_image_model === 'string' && settings.character_image_model.trim()) setCharsModel(settings.character_image_model);
         if (typeof settings?.scene_image_model === 'string' && settings.scene_image_model.trim()) setScenesModel(settings.scene_image_model);
@@ -752,7 +778,7 @@ export default function Agents() {
         return;
       }
       try {
-        const res = await axios.get(`${API_BASE}/agents/narrative/char-prompts`, { params: { session_path: sessionPath } });
+        const res = await axios.get(`${API_BASE}/agents/autoanimator/char-prompts`, { params: { session_path: sessionPath } });
         const rows = Array.isArray(res.data?.char_prompts) ? res.data.char_prompts : [];
         setCharPromptItems(rows.map((r) => ({ name: r.name, visual_prompt: r.visual_prompt || '' })));
       } catch {
@@ -775,7 +801,7 @@ export default function Agents() {
     const loadLocks = async () => {
       if (!sessionPath) return;
       try {
-        const res = await axios.get(`${API_BASE}/agents/narrative/locks`, { params: { session_path: sessionPath } });
+        const res = await axios.get(`${API_BASE}/agents/autoanimator/locks`, { params: { session_path: sessionPath } });
         const incoming = res.data?.locks || {};
         setSectionLocks((prev) => ({ ...DEFAULT_SECTION_LOCKS, ...prev, ...incoming }));
       } catch {
@@ -790,7 +816,7 @@ export default function Agents() {
     setSectionLocks(next);
     if (!sessionPath) return;
     try {
-      await axios.post(`${API_BASE}/agents/narrative/session-sync`, {
+      await axios.post(`${API_BASE}/agents/autoanimator/session-sync`, {
         session_path: sessionPath,
         settings: buildSessionSettingsSnapshot(),
         locks: next,
@@ -913,9 +939,28 @@ export default function Agents() {
   }, [page]);
 
   useEffect(() => {
+    const loadPlannerOptions = async () => {
+      try {
+        const res = await axios.get(`${API_BASE}/agents/autoanimator/planner-options`);
+        const themes = res.data?.themes || {};
+        const styles = res.data?.art_styles || {};
+        setPlannerThemes(themes);
+        setPlannerArtStyles(styles);
+      } catch {
+        setPlannerThemes({});
+        setPlannerArtStyles({});
+      }
+    };
+
+    if (page === 'workspace') {
+      loadPlannerOptions();
+    }
+  }, [page]);
+
+  useEffect(() => {
     const loadGoogleModels = async () => {
       try {
-        const res = await axios.get(`${API_BASE}/agents/narrative/google-models`);
+        const res = await axios.get(`${API_BASE}/agents/autoanimator/google-models`);
         const byTask = res.data?.by_task || {};
         const defaults = res.data?.defaults || {};
         setAvailableModelsByTask({
@@ -1120,8 +1165,8 @@ export default function Agents() {
   }
 
   return (
-    <div style={{ display: 'flex', gap: '1rem', height: '100%', position: 'relative' }}>
-      <div style={{ position: 'fixed', top: 18, right: 22, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div className="agents-layout" style={{ display: 'flex', gap: '1rem', height: '100%', position: 'relative' }}>
+      <div className="agents-toast-stack" style={{ position: 'fixed', top: 18, right: 22, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {toasts.map((t) => (
           <div
             key={t.id}
@@ -1141,19 +1186,24 @@ export default function Agents() {
           </div>
         ))}
       </div>
-      <aside className="glass-panel" style={{ width: 390, display: 'flex', flexDirection: 'column' }}>
-        <section style={{ padding: '1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <aside className="glass-panel agents-sidebar" style={{ width: 390, display: 'flex', flexDirection: 'column' }}>
+        <section className="agents-sidebar-header" style={{ padding: '1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="agents-sidebar-title-wrap">
+            <h2 className="agents-sidebar-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Play size={20} className="text-accent" /> {AGENTS_LIST.find((a) => a.id === selectedAgent)?.name}
             </h2>
-            <p style={{ marginTop: '0.45rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+            <p className="agents-sidebar-subtitle" style={{ marginTop: '0.45rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
               Preview-first configuration for higher quality narration and character consistency.
             </p>
           </div>
-          <button className="btn" onClick={() => navigate('/agents')} style={{ height: '2rem' }}>
-            Back
-          </button>
+          <div className="agents-sidebar-actions" style={{ display: 'flex', gap: '0.5rem' }}>
+            <button className="btn agents-action-btn" type="button" onClick={startNewSessionFromWorkspace} style={{ height: '2rem' }}>
+              Start New Session
+            </button>
+            <button className="btn agents-action-btn" type="button" onClick={goBackToAgentSelector} style={{ height: '2rem' }}>
+              Back
+            </button>
+          </div>
         </section>
 
         <section style={{ padding: '1rem', overflowY: 'auto', flex: 1 }}>
@@ -1335,7 +1385,14 @@ export default function Agents() {
             <fieldset disabled={sectionLocks.planner} style={{ border: 'none', padding: 0, margin: 0 }}>
             <div className="config-control">
               <label>Narrative Prompt</label>
-              <textarea rows={6} value={narrativePrompt} onChange={(e) => setNarrativePrompt(e.target.value)} style={{ width: '100%', resize: 'vertical' }} />
+              <textarea
+                className="planner-prompt-textarea"
+                rows={6}
+                wrap="soft"
+                value={narrativePrompt}
+                onChange={(e) => setNarrativePrompt(e.target.value)}
+                style={{ width: '100%', resize: 'vertical', maxWidth: '100%' }}
+              />
             </div>
             <div className="config-grid" style={{ marginTop: '0.65rem' }}>
               <div className="config-control">
@@ -1365,17 +1422,21 @@ export default function Agents() {
             </div>
             <div className="config-grid" style={{ marginTop: '0.65rem' }}>
               <div className="config-control">
+                <label>Theme</label>
+                <select value={theme} onChange={(e) => setTheme(e.target.value)} disabled={sessionMode === 'existing'}>
+                  <option value="auto-select">Auto-select (LLM)</option>
+                  {Object.entries(plannerThemes).map(([key, text]) => (
+                    <option key={key} value={key}>{key} - {String(text).slice(0, 44)}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="config-control">
                 <label>Art Style</label>
                 <select value={preset} onChange={(e) => setPreset(e.target.value)} disabled={sessionMode === 'existing'}>
-                  <option value="cinematic_anime">Cinematic Anime</option>
-                  <option value="noir_comic">Noir Comic</option>
-                  <option value="sci_fi_neon">Sci-Fi Neon</option>
-                  <option value="horror_manga">Horror Manga</option>
-                  <option value="magic_illusion_stage">Magic Illusion Stage</option>
-                  <option value="comedy_cartoon">Comedy Cartoon</option>
-                  <option value="ghibli_watercolor">Ghibli Watercolor</option>
-                  <option value="retro_pop_comic">Retro Pop Comic</option>
-                  <option value="space_opera_cinematic">Space Opera Cinematic</option>
+                  <option value="auto-select">Auto-select (LLM)</option>
+                  {Object.entries(plannerArtStyles).map(([key]) => (
+                    <option key={key} value={key}>{key}</option>
+                  ))}
                 </select>
               </div>
               <div className="config-control">
@@ -1701,7 +1762,7 @@ export default function Agents() {
                 <option value="tiktok">TikTok</option>
                 <option value="instagram_reels">Instagram Reels</option>
                 <option value="youtube_shorts">YouTube Shorts</option>
-                <option value="youtube_widescreen">YouTube Widescreen</option>
+                <option value="youtube_widescreen">YouTube Video (16:9 + Shorts export)</option>
               </select>
             </div>
             <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -2069,7 +2130,9 @@ export default function Agents() {
                     textShadow: '2px 2px 10px rgba(0,0,0,0.5)',
                   }}
                 >
-                  {narrativePrompt || 'Enter narrative prompt to preview on canvas.'}
+                  <div className="display-prompt-text">
+                    {narrativePrompt || 'Enter narrative prompt to preview on canvas.'}
+                  </div>
                 </div>
               )}
             </div>

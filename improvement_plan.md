@@ -1,8 +1,8 @@
-# Improvement Plan: CMiner NarrativeManga + Studio
+# Improvement Plan: CMiner AutoAnimator + Studio
 
 ## 1. Executive Summary
 
-Current codebase: an agentic pipeline (`agents/narrativeManga`) that plans story episodes, generates character/scene art via Gemini image model, synthesizes TTS lines, and stitches video with FFmpeg. Web UI (`web-studio`) currently has a run-only agent console.
+Current codebase: an agentic pipeline (`agents/autoAnimator`) that plans story episodes, generates character/scene art via Gemini image model, synthesizes TTS lines, and stitches video with FFmpeg. Web UI (`web-studio`) currently has a run-only agent console.
 
 Competitor reference: FacelessReels (https://www.facelessreels.com) offers: niche templates, preset visual styles, platform-specific resolutions, voice/music customization, auto-publish integrations, and analytics for viral performance.
 
@@ -12,8 +12,8 @@ Objective: enhance our studio and agents with better quality output, flexible st
 
 ## 2. Current Implementation Snapshot
 
-### NarrativeManga pipeline
-- `agents/narrativeManga/config.json` contains a fixed `art_style`, 1280x720 resolution, FPS 8, voice pool and model names.
+### AutoAnimator pipeline
+- `agents/autoAnimator/config.json` contains a fixed `art_style`, 1280x720 resolution, FPS 8, voice pool and model names.
 - `EpisodePlanner` produces structured JSON with characters + panels, uses prompt engineering with heavy “return strict JSON” enforcement.
 - `CharGen` and `SceneGen` use Gemini image model, include fallback placeholder generation and static prompt constraints.
 - `TTSGen` uses Edge-TTS, per-character assigned voice keys; no music or voice morphing.
@@ -94,7 +94,7 @@ FacelessReels differentiators:
 
 - Instrument pipeline to record quality indicators in `session_state.json`: generation cost, model confidence, LLM usage, failure counts, prompt revisions.
 - Add manual rating UI per episode; store in DB for “best performing” style templates.
-- Experiment in `agents/narrativeManga/chains/episode_planner.py` with optional “rewriting prompt using previous episode performance” to provide iterative improvement.
+- Experiment in `agents/autoAnimator/chains/episode_planner.py` with optional “rewriting prompt using previous episode performance” to provide iterative improvement.
 
 ---
 
@@ -102,7 +102,7 @@ FacelessReels differentiators:
 
 ### Phase 1 (week 1-2): foundational controls
 
-1. Add `preset` + `format` config in `agents/narrativeManga/config.json`.
+1. Add `preset` + `format` config in `agents/autoAnimator/config.json`.
 2. Extend `run.py` flags (`--preset`, `--format`, `--art_style`, `--tts_voice_pool`).
 3. Update `CharGen`/`SceneGen` prompts for dynamic aspect and style.
 4. Update UI `Agents.jsx` to pass body payload to `/api/agents/run`.
@@ -140,11 +140,11 @@ FacelessReels differentiators:
 
 ## 7. Code pointers for immediate action
 
-- `agents/narrativeManga/config.json` (add presets, voice categories, output_specs)
-- `agents/narrativeManga/run.py` (parse new CLI flags, apply them to planners/generators)
-- `agents/narrativeManga/chains/episode_planner.py` (theme template + viral hook prompt helper)
-- `agents/narrativeManga/chains/char_gen.py` / `scene_gen.py` (dynamic aspect, style anchors, multi-candidates + selection)
-- `agents/narrativeManga/chains/moviemaker.py` (multi-size outputs, music mixing, caption metadata)
+- `agents/autoAnimator/config.json` (add presets, voice categories, output_specs)
+- `agents/autoAnimator/run.py` (parse new CLI flags, apply them to planners/generators)
+- `agents/autoAnimator/chains/episode_planner.py` (theme template + viral hook prompt helper)
+- `agents/autoAnimator/chains/char_gen.py` / `scene_gen.py` (dynamic aspect, style anchors, multi-candidates + selection)
+- `agents/autoAnimator/chains/moviemaker.py` (multi-size outputs, music mixing, caption metadata)
 - `web-studio/src/pages/Agents.jsx`, `studio/screens/session_explorer.py` (UI configuration & analytics)
 
 ---

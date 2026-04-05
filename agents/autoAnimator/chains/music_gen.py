@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from agents.muicStruddler.music_agent import StrudelMusicAgent, LyriaMusicAgent
-from agents.narrativeManga.utils import get_model
+from agents.autoAnimator.utils import get_model
 from agents.shared.llm_tracker import LLMTracker, tracked_generate
 
 

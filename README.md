@@ -16,7 +16,7 @@ This repository now supports a production-grade, session-aware, step-wise AI med
 - Run/redo controls for each stage with reset toggles.
 - Model-aware controls in UI and API payload propagation.
 
-### NarrativeManga pipeline
+### AutoAnimator pipeline
 - Episode planning with continuity context and strict JSON storyboard generation.
 - Character portrait generation with validation/retry hardening.
 - Scene generation anchored to character references.
@@ -51,7 +51,7 @@ This repository now supports a production-grade, session-aware, step-wise AI med
 - Better synchronization of session metadata and step configuration.
 
 ### Outputs and metadata
-- Session-scoped outputs in `outputs/<session_id>/narrativeManga`.
+- Session-scoped outputs in `outputs/<session_id>/AutoAnimator`.
 - Final video metadata and thumbnails generated with movie output.
 - Music assets and planning files persisted under `music/`.
 
@@ -120,7 +120,7 @@ Automates news gathering and analysis reports.
 python3 main.py newsdesk --agent newsaligator --hours 24
 ```
 
-### NarrativeManga Agent
+### AutoAnimator Agent
 Generates episodic, cinematic manga-style videos with high character consistency and plot continuity.
 
 #### 🎬 Episodic Workflow
@@ -128,19 +128,19 @@ The agent manages series state and allows for sequential episode generation.
 
 *   **Start a New Series**:
     ```bash
-    python3 main.py narrativeManga --prompt "A sci-fi detective noir"
+    python3 main.py AutoAnimator --prompt "A sci-fi detective noir"
     ```
 *   **Plan the Next Episode**:
     ```bash
-    python3 main.py narrativeManga --session outputs/XXXXXXX/narrativeManga --episodes continue
+    python3 main.py AutoAnimator --session outputs/XXXXXXX/AutoAnimator --episodes continue
     ```
 *   **Develop the Next Episode**:
     ```bash
-    python3 main.py narrativeManga --session outputs/XXXXXXX/narrativeManga --episodes continue --develop
+    python3 main.py AutoAnimator --session outputs/XXXXXXX/AutoAnimator --episodes continue --develop
     ```
 
 #### 🛠️ Modular Pipeline
-Similar to the Podcasting agent, NarrativeManga can be run step-by-step:
+Similar to the Podcasting agent, AutoAnimator can be run step-by-step:
 - `planner`: Storyboard and character design.
 - `chars`: Reference portraits for consistency.
 - `scenes`: Multi-modal panel generation using portraits.
@@ -148,10 +148,10 @@ Similar to the Podcasting agent, NarrativeManga can be run step-by-step:
 - `clouds`: Dynamic speech bubble placement (OpenCV).
 - `video`: Final FFmpeg assembly.
 
-#### ✨ New narrativeManga features (in this branch)
+#### ✨ New AutoAnimator features (in this branch)
 - Theme preset support (`--theme`) for narrative templates (scary stories, mystery, slice-of-life).
 - Art style presets (`--preset`) and multi-output format presets (`--format`, including tiktok/instagram/youtube specs).
-- Configuration in `agents/narrativeManga/config.json` for themes, art_styles, output_presets, and voice pools.
+- Configuration in `agents/autoAnimator/config.json` for themes, art_styles, output_presets, and voice pools.
 - UI form with theme/art/format options in `web-studio/src/pages/Agents.jsx`.
 - `MovieMaker` now supports optional music mixing (`--enable_music`) and auto metadata/thumbnail generation.
 - Anchor metadata support in char generation (`char_anchors.json`) for better scene consistency.

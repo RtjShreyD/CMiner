@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional, Tuple
 
 from PIL import Image
 
-from agents.narrativeManga.utils import get_model
+from agents.autoAnimator.utils import get_model
 from agents.shared.llm_tracker import LLMTracker, tracked_generate
 
 
@@ -23,19 +23,23 @@ class CharGen:
         max_generations: int = 5,
         resolution: Tuple[int, int] = (1280, 720),
         art_style: str = "cinematic anime",
+        aesthetic_guidance: str = "",
         tracker: Optional[LLMTracker] = None,
     ):
         self.image_model_name = image_model_name
         self.max_generations = max_generations
         self.resolution = resolution
         self.art_style = art_style
+        self.aesthetic_guidance = aesthetic_guidance or ""
         self.tracker = tracker
 
     def _build_prompt(self, visual_prompt: str) -> str:
         width, height = self.resolution
+        aesthetics = f" Aesthetic direction: {self.aesthetic_guidance}." if self.aesthetic_guidance else ""
         return (
             f"A full-body character portrait for manga. {visual_prompt}. "
             f"Art style: {self.art_style}. "
+            f"{aesthetics}"
             f"Clean background, professional character sheet style. "
             f"CRITICAL: {width}:{height} aspect (exact {width}x{height}) resolution."
         )
