@@ -145,7 +145,7 @@ class TTSGen:
 
         duration_units = int(round(duration * 10_000_000))
         timing_payload = [{
-            "character": "Narrator",
+            "character": "Speaker",
             "text": "",
             "offset": 0,
             "duration": max(1, duration_units),
@@ -212,7 +212,7 @@ class TTSGen:
             all_text_parts: List[Dict[str, str]] = []
             if isinstance(dialogue_lines, list):
                 for dl in dialogue_lines:
-                    char_name = dl.get("character", "Narrator")
+                    char_name = dl.get("character", "Speaker")
                     line = dl.get("line", "")
                     voice = voice_map.get(char_name, "en-US-AriaNeural")
                     if self.tts_provider == "edge" and self._is_hindi_text(line):
@@ -475,7 +475,7 @@ class TTSGen:
     def _build_synthetic_word_timings(text_parts: List[Dict[str, str]], total_duration_sec: float) -> List[dict]:
         words: List[tuple[str, str]] = []
         for part in text_parts:
-            cname = str(part.get("character", "Narrator") or "Narrator")
+            cname = str(part.get("character", "Speaker") or "Speaker")
             line = str(part.get("line", "") or "")
             for w in line.split():
                 words.append((cname, w))
@@ -507,7 +507,7 @@ class TTSGen:
         if client is None or genai_types is None:
             raise RuntimeError("Gemini TTS is not available. Check GEMINI_API_KEY and google-genai package.")
 
-        script = "\n".join([f"{p.get('character', 'Narrator')}: {p.get('line', '')}" for p in text_parts])
+        script = "\n".join([f"{p.get('character', 'Speaker')}: {p.get('line', '')}" for p in text_parts])
         prompt = (
             "Synthesize clear narrated dialogue audio for the following script. "
             "Keep pacing natural and cinematic.\n\n"

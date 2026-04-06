@@ -37,6 +37,37 @@ def _first_key(mapping: dict) -> str | None:
     return None
 
 
+def _normalize_tts_voices_pool(raw_pool: dict) -> dict:
+    """Return a compatibility-safe voice pool with both legacy and generic keys.
+
+    Legacy keys: narrator, hero, villain, support
+    Generic keys: voice_a, voice_b, voice_c, voice_d
+    """
+    pool = dict(raw_pool) if isinstance(raw_pool, dict) else {}
+    normalized: dict[str, list[str]] = {}
+
+    for key, value in pool.items():
+        if isinstance(value, list):
+            cleaned = [str(v).strip() for v in value if str(v).strip()]
+            if cleaned:
+                normalized[str(key)] = cleaned
+
+    alias_pairs = {
+        "voice_a": "narrator",
+        "voice_b": "hero",
+        "voice_c": "villain",
+        "voice_d": "support",
+    }
+
+    for generic_key, legacy_key in alias_pairs.items():
+        if generic_key in normalized and legacy_key not in normalized:
+            normalized[legacy_key] = list(normalized[generic_key])
+        elif legacy_key in normalized and generic_key not in normalized:
+            normalized[generic_key] = list(normalized[legacy_key])
+
+    return normalized
+
+
 def _parse_json_object(raw: str) -> dict:
     start = raw.find("{")
     end = raw.rfind("}")
@@ -564,7 +595,7 @@ def main():
         char_image_model = args.character_image_model
     if args.scene_image_model:
         scene_image_model = args.scene_image_model
-    tts_voices_pool = config.get("tts_voices_pool", {})
+    tts_voices_pool = _normalize_tts_voices_pool(config.get("tts_voices_pool", {}))
 
     # ── State Management (early) ─────────────────────────────
     state_path = session_dir / "session_state.json"
@@ -679,6 +710,18 @@ def main():
     if not selected_style_keys:
         default_style_key = _first_key(art_styles)
         selected_style_keys = [default_style_key] if default_style_key else []
+
+    # Stage-show default steering: prefer the dedicated stage-show theme/style unless explicitly overridden.
+    stage_show_theme_key = "stage_show_portal_satire"
+    stage_show_style_key = "rick_morty_stage_show"
+    if niche_key == "stage_show":
+        if auto_theme and stage_show_theme_key in themes:
+            selected_theme_key = stage_show_theme_key
+        if auto_preset and stage_show_style_key in art_styles:
+            selected_style_keys = [
+                stage_show_style_key,
+                *[k for k in selected_style_keys if k != stage_show_style_key],
+            ][:2]
 
     resolved_theme = themes.get(selected_theme_key) if selected_theme_key else None
     art_style = _resolve_art_style_text(selected_style_keys, art_styles if isinstance(art_styles, dict) else {})

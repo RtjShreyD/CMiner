@@ -282,7 +282,7 @@ class SceneGen:
             for dl in dialogue_rows[:5]:
                 if not isinstance(dl, dict):
                     continue
-                cname = str(dl.get("character", "Narrator") or "Narrator")
+                cname = str(dl.get("character", "Speaker") or "Speaker")
                 line = str(dl.get("line", "") or "").strip()
                 if line:
                     dialogue_context.append(f"{cname}: {line}")

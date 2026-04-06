@@ -180,6 +180,11 @@ export default function Agents() {
     ...DEFAULT_SECTION_LOCKS,
   });
 
+  const selectedNicheConfig = plannerNiches && niche && niche !== 'auto-select'
+    ? plannerNiches[niche]
+    : null;
+  const selectedNicheDirectorContext = String(selectedNicheConfig?.director_context || '').trim();
+
   const ws = useRef(null);
   const wsIntentionalCloseRef = useRef(false);
   const sessionPathRef = useRef('');
@@ -403,6 +408,7 @@ export default function Agents() {
     theme,
     preset,
     niche,
+    niche_context: selectedNicheDirectorContext || null,
     format,
     planner_model: plannerModel,
     character_image_model: charsModel,
@@ -1860,6 +1866,21 @@ export default function Agents() {
                   ))}
                 </select>
               </div>
+            </div>
+            <div className="config-control" style={{ marginTop: '0.65rem' }}>
+              <label>Director Context Prompt (from selected niche)</label>
+              <textarea
+                className="planner-prompt-textarea"
+                rows={4}
+                wrap="soft"
+                value={
+                  niche === 'auto-select'
+                    ? 'Auto-select is enabled. Director context will be chosen from the selected niche at runtime.'
+                    : (selectedNicheDirectorContext || 'No director_context defined for this niche in config.')
+                }
+                readOnly
+                style={{ width: '100%', resize: 'vertical', maxWidth: '100%', opacity: 0.9 }}
+              />
             </div>
             <div className="config-grid" style={{ marginTop: '0.65rem' }}>
               <div className="config-control">

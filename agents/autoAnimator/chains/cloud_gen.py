@@ -195,7 +195,7 @@ class CloudGen:
         # Get unique speakers
         speakers = []
         for dl in dialogue_lines:
-            cname = dl.get("character", "Narrator")
+            cname = dl.get("character", "Speaker")
             if cname not in speakers:
                 speakers.append(cname)
 

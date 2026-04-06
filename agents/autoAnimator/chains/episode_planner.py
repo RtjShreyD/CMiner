@@ -104,13 +104,8 @@ class EpisodePlanner:
 
             dialogue = clone.get("dialogue", []) if isinstance(clone.get("dialogue", []), list) else []
             if dialogue:
-                d0 = dialogue[0] if isinstance(dialogue[0], dict) else {}
-                line = str(d0.get("line", "")).strip()
-                if line and len(line.split()) > 6:
-                    words = line.split()
-                    pivot = max(3, len(words) // 2)
-                    d0["line"] = " ".join(words[:pivot])
-                    clone["dialogue"] = [d0]
+                # Preserve all dialogue lines verbatim during expansion; never truncate spoken content.
+                clone["dialogue"] = [dict(dl) for dl in dialogue if isinstance(dl, dict)]
 
             clone["duration_seconds"] = max(1, int(clone.get("duration_seconds", 1) or 1))
             expanded.append(clone)
@@ -306,9 +301,14 @@ class EpisodePlanner:
 
         rs = manga_board.setdefault("render_strategy", {})
         stage_anchor = rs.get("stage_anchor")
+        episode_num = max(1, int(manga_board.get("episode_number", 1) or 1))
+        show_banner_title = str(rs.get("show_banner_title", "") or "").strip() or f"{self.project_name} LIVE"
+        rs["show_banner_title"] = show_banner_title
+        rs["show_banner_panel"] = 1
+        rs["show_banner_continuity"] = "episode1_generated_reused_after"
         if not isinstance(stage_anchor, str) or not stage_anchor.strip():
             stage_anchor = (
-                "Persistent futuristic stage set: central demo platform, judges desk (Brahma/Vishnu/Mahesh), "
+                "Persistent futuristic stage set: central demo platform, judges desk for core cast, "
                 "audience silhouettes, consistent LED backdrop, and controlled spotlight rig."
             )
         rs["stage_anchor"] = stage_anchor
@@ -350,6 +350,37 @@ class EpisodePlanner:
 
             panel["scene_description"] = scene_desc
 
+        # Stage-show hard rule:
+        # Episode 1 must generate a canonical banner frame; later episodes must reuse that frame as panel 1.
+        first_panel = panels[0] if panels and isinstance(panels[0], dict) else None
+        if first_panel:
+            if episode_num == 1:
+                first_panel["render_method"] = "static_frame"
+                first_panel["reuse_from_previous_episode_panel"] = None
+                first_panel.setdefault("camera_angle", "wide-shot")
+                first_panel.setdefault("mood", "dramatic")
+                first_panel["scene_description"] = (
+                    f"Canonical stage-show banner reveal with persistent brand identity: {show_banner_title}. "
+                    f"{stage_anchor}"
+                )
+                first_panel["static_frame_spec"] = {
+                    "renderer": "title_card",
+                    "bg_color": "#0D1021",
+                    "gradient": ["#0D1021", "#202A52"],
+                    "show_text": True,
+                    "title_text": show_banner_title,
+                }
+            else:
+                first_panel["reuse_from_previous_episode_panel"] = 1
+                first_panel["render_method"] = "llm_image"
+                first_panel["scene_description"] = (
+                    f"Reuse canonical stage-show banner frame from previous episode panel 1. "
+                    f"{stage_anchor}"
+                )
+                # Reused image should remain visually identical; spoken beats start from panel 2 onward.
+                first_panel["dialogue"] = []
+                first_panel.pop("static_frame_spec", None)
+
     def _run_director_pass(
         self,
         draft_board: Dict[str, Any],
@@ -381,10 +412,12 @@ class EpisodePlanner:
         if niche_label == "stage_show":
             stage_show_rule = (
                 "- Enforce a persistent stage geography across panels (judges desk, demo zone, audience axis).\\n"
-                "- Keep Brahma/Vishnu/Mahesh visual identity and blocking consistent; update only pose/expression/camera dynamics.\\n"
+                "- Keep the recurring cast visual identity and blocking consistent; update only pose/expression/camera dynamics.\\n"
                 "- Add per-panel continuity metadata: continuity_from_panel, shot_intent, pose_direction.\\n"
                 "- Use lively anime camera progression (wide -> medium -> close reaction -> device hero -> crowd beat) without location drift.\\n"
                 "- Keep scene_description tightly synchronized with actual dialogue beat in that panel.\\n"
+                "- Character names are immutable across the episode/series: preserve exact spelling from established cast and prior context.\\n"
+                "- Dialogue quality rule: avoid one-word spoken lines except intentional reaction beats (e.g., Wow!, Huh?); most lines should be full natural phrases.\\n"
             )
 
         strategy_prompt = (
@@ -451,6 +484,7 @@ class EpisodePlanner:
             "4a) For baseline_theme prompts (2-5 lines), synthesize a complete story arc with setup, escalation, payoff.\n"
             "4b) For short_script/full_script prompts, transform script prose into visual staging, narration lines, and character dialogue.\n"
             "4c) Respect NICHE DIRECTOR CONTEXT as a hard quality/style steering signal when present.\n"
+            "4d) Dialogue completeness rule: keep full scene-wise spoken lines; never truncate or abbreviate dialogue text for brevity.\n"
             "5) Keep voice assignments deterministic and valid for TTS.\n"
             "6) Enforce practical render strategy for the available model stack.\n\n"
             "6a) For intense action/image-sequence moments, increase FPS hints within budget-conscious limits.\n"
@@ -459,8 +493,10 @@ class EpisodePlanner:
             "7) Decide panel-wise render method: either 'llm_image' or 'static_frame'. Use static_frame for simple visuals (void, black, white, solid color, title card, intertitle, simple gradient).\n"
             "8) For static_frame panels, include static_frame_spec with local-render details (renderer, bg_color or gradient, optional title_text).\n\n"
             "10) If PRIMARY LANGUAGE HINT is hindi, produce natural Hindi dialogue (Devanagari) by default; use Hinglish only when it improves clarity for modern tone.\n\n"
-            "11) Decide delivery mode per spoken line: narration vs character dialogue; use Narrator only where scene exposition is needed.\n"
+            "11) Decide delivery mode per spoken line: narration vs character dialogue; use neutral voiceover lines only where scene exposition is needed.\n"
             "12) Add emotional intent tags per line where useful: sarcastic, happy, overwhelmed, curious, sad, angry, tense, neutral.\n\n"
+            "12b) If a spoken line is long, split it into additional lines/panels instead of cutting words from the original intent.\n"
+            "12a) Spoken line quality: avoid one-word lines unless it is an intentional reaction beat; keep most spoken lines as natural full phrases (typically 6-18 words).\n"
             f"13) Niche structural rules:\n{niche_intro_outro_rule or '- Follow the niche rhythm naturally without forcing extra beats.\n'}\n"
             f"13a) Stage-show continuity rules:\n{stage_show_rule or '- Not a stage-show episode.\n'}\n"
             "14) If a panel can intentionally re-use an already generated previous-episode scene (flashback, callback, recap, same location framing), set reuse_from_previous_episode_panel to that prior panel number.\n\n"
@@ -577,7 +613,6 @@ class EpisodePlanner:
                         prior_context += f"    {dl.get('character', '?')}: \"{dl.get('line', '')}\"\n"
                 prior_context += "\nContinue the story DIRECTLY from this point.\n"
 
-        max_words = self.max_duration_mins * 150
         language_hint = self._detect_language_hint(base_prompt)
         script_profile = self._script_profile(base_prompt)
 
@@ -620,9 +655,10 @@ class EpisodePlanner:
         if niche_label == "stage_show":
             stage_show_planner_rules = (
                 "- Keep a persistent stage map across all panels; do not jump to unrelated locations.\n"
-                "- Judges Brahma/Vishnu/Mahesh must retain consistent appearance and desk position continuity.\n"
+                "- Core recurring cast must retain consistent appearance and desk/stage position continuity.\n"
                 "- Make presentation lively via camera and pose evolution, not random scene resets.\n"
                 "- Each panel's scene_description must match its dialogue beat and intended action.\n"
+                "- Preserve exact character names from established cast/prior context; do not rename characters.\n"
             )
 
         aesthetic_text = f"AESTHETIC DIRECTION: {self.aesthetic_guidance}\n" if self.aesthetic_guidance else ""
@@ -643,7 +679,7 @@ class EpisodePlanner:
             f"EPISODE TYPE:\n{episode_type}\n"
             f"INSTRUCTIONS:\n"
             f"Create Episode {next_num}. Target ~{self.max_duration_mins} minutes "
-            f"of narrated video (~{max_words} words total dialogue).\n\n"
+            f"of narrated video with full scene-wise dialogue coverage.\n\n"
             f"NARRATIVE ADHERENCE RULES:\n"
             f"- SERIES PRESET PROMPT is persistent source-of-truth for this series baseline.\n"
             f"- BASE STORY PREMISE is the source-of-truth for this run; preserve its core entities, intent, and conflict.\n"
@@ -663,6 +699,10 @@ class EpisodePlanner:
             f"LANGUAGE RULES:\n"
             f"- If PRIMARY LANGUAGE HINT is hindi, make dialogue naturally Hindi (Devanagari) unless scene context demands bilingual style.\n"
             f"- Keep character and panel structure compatible with downstream TTS and subtitles.\n\n"
+            f"DIALOGUE QUALITY RULES:\n"
+            f"- Keep full dialogue lines for each scene beat; never truncate or abbreviate line text for brevity.\n"
+            f"- Avoid one-word lines except intentional reaction beats.\n"
+            f"- Most spoken lines should be complete natural phrases (typically 6-18 words).\n\n"
             f"Return ONLY strict JSON:\n"
             f"{{\n"
             f'  "episode_number": {next_num},\n'
@@ -670,7 +710,7 @@ class EpisodePlanner:
             f'  "episode_summary": "2-3 sentence summary of this episode including key events and cliffhanger",\n'
             f'  "characters": [\n'
             f'    {{\n'
-            f'      "name": "Name",\n'
+            f'      "name": "CharacterName",\n'
             f'      "description": "Role and personality",\n'
             f'      "visual_prompt": "EXACT detailed visual description for consistent image generation across episodes (hair color/style, eye color, outfit details, body type, distinguishing marks). Art style: {self.art_style}.",\n'
             f'      "voice_profile": "Voice tone description",\n'
@@ -680,9 +720,9 @@ class EpisodePlanner:
             f'  "panels": [\n'
             f'    {{\n'
             f'      "panel_number": 1,\n'
-            f'      "characters_present": ["Name1"],\n'
+            f'      "characters_present": ["CharacterName"],\n'
             f'      "dialogue": [\n'
-            f'        {{"character": "Name1", "line": "Dialogue text", "emotion": "neutral|sarcastic|happy|overwhelmed|curious|sad|angry|tense", "delivery_mode": "dialogue|narration|voiceover|silent"}}\n'
+            f'        {{"character": "CharacterName", "line": "Dialogue text", "emotion": "neutral|sarcastic|happy|overwhelmed|curious|sad|angry|tense", "delivery_mode": "dialogue|narration|voiceover|silent"}}\n'
             f'      ],\n'
             f'      "scene_description": "Detailed scene for image generation with art style: {self.art_style}",\n'
             f'      "camera_angle": "close-up | medium-shot | wide-shot | birds-eye | low-angle",\n'
@@ -731,7 +771,11 @@ class EpisodePlanner:
         manga_board["render_strategy"]["niche"] = self.niche_name or "auto"
         if self.niche_context:
             manga_board["render_strategy"]["niche_context"] = self.niche_context
-        manga_board["render_strategy"]["first_frame_title"] = f"{self.project_name} - Episode {next_num}"
+        if (self.niche_name or "") == "stage_show":
+            manga_board["render_strategy"]["first_frame_title"] = f"{self.project_name} LIVE"
+            manga_board["render_strategy"]["show_banner_title"] = f"{self.project_name} LIVE"
+        else:
+            manga_board["render_strategy"]["first_frame_title"] = f"{self.project_name} - Episode {next_num}"
         manga_board["render_strategy"]["director_model"] = self.director_model_name
         manga_board["render_strategy"]["planner_model"] = self.model_name
         if self.start_frame_path:

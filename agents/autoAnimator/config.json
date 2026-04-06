@@ -17,10 +17,10 @@
     "gemini_tts_model": "models/gemini-2.5-flash-tts"
   },
   "voice_profiles": {
-    "narrator": ["en-US-AriaNeural", "en-GB-SoniaNeural"],
-    "hero": ["en-US-ChristopherNeural"],
-    "villain": ["en-GB-RyanNeural"],
-    "support": ["en-IN-NeerjaNeural", "hi-IN-SwaraNeural"],
+    "voice_a": ["en-US-AriaNeural", "en-GB-SoniaNeural"],
+    "voice_b": ["en-US-ChristopherNeural"],
+    "voice_c": ["en-GB-RyanNeural"],
+    "voice_d": ["en-IN-NeerjaNeural", "hi-IN-SwaraNeural"],
     "hindi": ["hi-IN-SwaraNeural", "hi-IN-MadhurNeural"]
   },
   "video": {
@@ -35,7 +35,8 @@
     "sci_fi_epic": "A sweeping sci-fi tone with futuristic worldbuilding, high-stakes conflict, and awe-driven discoveries.",
     "comedy_sketch": "A light comedy rhythm with witty banter, situational humor, and punchline-driven scene transitions.",
     "cartoon_adventure": "A playful cartoon-adventure tone with exaggerated action, bright emotional swings, and family-friendly fun.",
-    "ghibli_wonder": "A gentle, whimsical tone inspired by pastoral wonder, emotional intimacy, and environmental magic."
+    "ghibli_wonder": "A gentle, whimsical tone inspired by pastoral wonder, emotional intimacy, and environmental magic.",
+    "stage_show_portal_satire": "A high-energy live stage show tone with absurd sci-fi comedy, deadpan banter, chaotic invention reveals, and sharp audience-reactive pacing."
   },
   "art_styles": {
     "cinematic_anime": "cinematic anime, high detail, dynamic dramatic composition, volumetric lighting",
@@ -46,7 +47,8 @@
     "comedy_cartoon": "clean cartoon linework, expressive faces, comedic timing poses, bright saturated color palette",
     "ghibli_watercolor": "soft hand-painted watercolor anime style, warm natural lighting, lush backgrounds, whimsical atmosphere",
     "retro_pop_comic": "retro pop comic halftone textures, bold outlines, dynamic captions, vibrant primary colors",
-    "space_opera_cinematic": "space-opera cinematic concept art, nebula backdrops, epic framing, dramatic rim lighting"
+    "space_opera_cinematic": "space-opera cinematic concept art, nebula backdrops, epic framing, dramatic rim lighting",
+    "rick_morty_stage_show": "stylized adult cartoon anime hybrid with bold outlines, simplified expressive anatomy, exaggerated reaction faces, sci-fi gadget chaos, punchy stage lighting, and comedic timing-driven poses"
   },
   "output_presets": {
     "tiktok": {"resolution": [1080, 1920], "fps": 30, "duration_mins": 1, "aspect": "9:16"},
@@ -69,7 +71,7 @@
     },
     "stage_show": {
       "label": "Stage show",
-      "director_context": "Frame the episode as a live stage performance with a persistent stage map (judges desk, demo platform, audience axis, LED backdrop). Keep every character's visual identity, spatial position, and role continuity strongly consistent while evolving pose, expression, and camera dynamics shot-by-shot. Use anime-style shot progression (establishing wide, presenter medium, judge close reaction, device hero shot, crowd beat), keep dialogue and scene beats tightly synchronized, enforce strict panel-to-panel continuity, and close with a clear applause/payoff moment."
+      "director_context": "Frame the episode as a live stage performance with a persistent stage map (judges desk, demo platform, audience axis, LED backdrop). Keep every character's visual identity, spatial position, and role continuity strongly consistent while evolving pose, expression, and camera dynamics shot-by-shot. Use anime-style shot progression (establishing wide, presenter medium, judge close reaction, device hero shot, crowd beat), keep dialogue and scene beats tightly synchronized, enforce strict panel-to-panel continuity, and close with a clear applause/payoff moment. Prefer a stylized adult cartoon anime look with sci-fi satire energy (rick_morty_stage_show art style) for this niche unless user explicitly overrides style."
     },
     "series_drama": {
       "label": "Series drama",
@@ -77,10 +79,10 @@
     }
   },
   "tts_voices_pool": {
-    "narrator": ["en-US-AriaNeural", "en-GB-SoniaNeural"],
-    "hero": ["en-US-ChristopherNeural"],
-    "villain": ["en-GB-RyanNeural"],
-    "support": ["en-IN-NeerjaNeural", "hi-IN-SwaraNeural"],
+    "voice_a": ["en-US-AriaNeural", "en-GB-SoniaNeural"],
+    "voice_b": ["en-US-ChristopherNeural"],
+    "voice_c": ["en-GB-RyanNeural"],
+    "voice_d": ["en-IN-NeerjaNeural", "hi-IN-SwaraNeural"],
     "hindi": ["hi-IN-SwaraNeural", "hi-IN-MadhurNeural"]
   }
 }
