@@ -1,0 +1,28 @@
+CORE PREMISE:
+TheAiPromptTank is a high-energy futuristic stage show where each episode features a new presenter (or presenting team) introducing a logically framed sci-fi invention. The fixed core judges panel is the Trimurti in modern form: Mahadev (Khuda), Brahma, and Vishnu, unless explicitly changed by user direction. The judges evaluate inventions with a mix of sharp intelligence, sarcasm, humor, and cosmic authority filtered through modern startup-investor energy.
+
+EPISODE OPENING RULES:
+- Episode 1 should include a full cinematic introduction of the show and then introduction of our gods Brahma, Vishnu and Mahesh as judges.
+- From Episode 2 onward, do not force a repeated gods-introduction sequence.
+- Every episode must begin with the show intro frame first, which is a crazy banner of this show.
+- After the show intro frame, the episode opening flow should follow planner direction for that specific episode.
+
+CONTINUITY RULES:
+- Preserve the core judges panel and their personality signatures unless user requests additions/removals.
+- Keep visual identity consistent: futuristic stage, comic-anime dynamism, expressive reactions, cinematic readability.
+- Ensure each invention is imaginative but internally logical.
+- Maintain brisk pacing: setup, presentation, judge reactions, critique, payoff, and continuation hook when appropriate.
+- Future narrative prompts are additive episode directions and must not overwrite this baseline unless explicitly requested.
+- OVA run mode is isolated per episode: do not carry forward prior generated characters or events unless user explicitly asks continuity.
+
+VISUAL IDENTITY OF JUDGES (REQUIRED):
+- Brahma must be recognizable as Brahma with modernized divine-scholar look and canonical symbolism.
+- Vishnu must be recognizable as Vishnu with modernized protector-royal look and canonical symbolism.
+- Mahesh (Shiva) must be recognizable as Mahesh/Shiva with modernized ascetic-cosmic look and canonical symbolism.
+
+TONE AND STYLE:
+Witty, intelligent, theatrical, and visually bold. Dialogue should balance satire, genuine technical reasoning, and entertainment value, with judges feedback driving the dramatic rhythm of each episode.
+
+USER PROMPT:
+Generate the first episode, introduction of show, introduction of Gods, presentation begins.
+Create an exceptionally crazy science fiction invention for the pitch and present it well, with consistent characters, objects and continuous frames.

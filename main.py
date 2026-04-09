@@ -104,6 +104,33 @@ def _build_parser() -> argparse.ArgumentParser:
         help="When used with --episodes continue, also runs generation chains.",
     )
 
+    ova_parser = subparsers.add_parser(
+        "ova",
+        help="Run OVA episodic video pipeline",
+        description="Generate OVA episodes with speech-cloud detection and text patching",
+    )
+    ova_parser.add_argument("--workspace", default=".", help="Workspace root")
+    ova_parser.add_argument("--prompt", help="Override base prompt (otherwise reads prompt.txt)")
+    ova_parser.add_argument(
+        "--step",
+        choices=["all", "planner", "chars", "scenes", "audio", "clouds", "video"],
+        default="all",
+        help="Execute specific pipeline step",
+    )
+    ova_parser.add_argument("--session", help="Continue work in an existing session directory")
+    ova_parser.add_argument("--episode", type=int, help="Target a specific episode number")
+    ova_parser.add_argument(
+        "--episodes",
+        choices=["new", "continue"],
+        default="new",
+        help="'new' starts a fresh series. 'continue' plans the next episode from prior context.",
+    )
+    ova_parser.add_argument(
+        "--develop",
+        action="store_true",
+        help="When used with --episodes continue, also runs generation chains.",
+    )
+
     char_gen_parser = subparsers.add_parser(
         "charGen",
         help="Generate reusable character packs",
@@ -239,6 +266,40 @@ def _run_narrative_manga(
     return proc.returncode
 
 
+def _run_ova(
+    workspace: str,
+    prompt: str | None,
+    step: str = "all",
+    session: str | None = None,
+    episode: int | None = None,
+    episodes: str = "new",
+    develop: bool = False,
+) -> int:
+    runner_script = ROOT / "agents" / "ova" / "run.py"
+
+    cmd = [
+        sys.executable,
+        str(runner_script),
+        "--workspace",
+        workspace,
+        "--step",
+        step,
+    ]
+    if prompt:
+        cmd.extend(["--prompt", prompt])
+    if session:
+        cmd.extend(["--session", session])
+    if episode is not None:
+        cmd.extend(["--episode", str(episode)])
+    if episodes == "continue":
+        cmd.append("--episodes")
+        cmd.append("continue")
+    if develop:
+        cmd.append("--develop")
+    proc = subprocess.run(cmd, check=False)
+    return proc.returncode
+
+
 def _run_char_gen(
     workspace: str,
     prompt: str,
@@ -310,6 +371,19 @@ def main() -> None:
     if args.command == "narrativeManga":
         raise SystemExit(
             _run_narrative_manga(
+                workspace=args.workspace,
+                prompt=args.prompt,
+                step=args.step,
+                session=args.session,
+                episode=args.episode,
+                episodes=args.episodes,
+                develop=args.develop,
+            )
+        )
+
+    if args.command == "ova":
+        raise SystemExit(
+            _run_ova(
                 workspace=args.workspace,
                 prompt=args.prompt,
                 step=args.step,
