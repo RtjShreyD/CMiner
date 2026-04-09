@@ -266,7 +266,7 @@ class SceneGen:
                 manifest[panel_key] = str(scene_path)
                 scene_signatures[panel_key] = panel_sig
                 ep_copy = episode_scenes_dir / f"{panel_key}.png"
-                shutil.copy2(scene_path, ep_copy)
+                self._mirror_to_episode(scene_path, ep_copy)
                 continue
 
             scene_desc = panel.get("scene_description", "A dramatic manga scene")
@@ -296,7 +296,7 @@ class SceneGen:
                     manifest[panel_key] = str(scene_path)
                     scene_signatures[panel_key] = panel_sig
                     ep_copy = episode_scenes_dir / f"{panel_key}.png"
-                    shutil.copy2(scene_path, ep_copy)
+                    self._mirror_to_episode(scene_path, ep_copy)
                     print(f"Reused previous-episode scene for {panel_key} from panel_{reuse_idx:02d}.")
                     continue
 
@@ -400,7 +400,7 @@ class SceneGen:
             manifest[panel_key] = str(scene_path)
             scene_signatures[panel_key] = panel_sig
             ep_copy = episode_scenes_dir / f"{panel_key}.png"
-            shutil.copy2(scene_path, ep_copy)
+            self._mirror_to_episode(scene_path, ep_copy)
 
         manifest_path = scenes_dir / "scenes_manifest.json"
         with open(manifest_path, "w") as f:
@@ -417,3 +417,14 @@ class SceneGen:
                 print(f"  Resizing from {img.size} to {self.resolution}")
                 img = img.resize(self.resolution, Image.Resampling.LANCZOS)
             img.save(img_path)
+
+    @staticmethod
+    def _mirror_to_episode(src: Path, dst: Path):
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.exists():
+            dst.unlink(missing_ok=True)
+        try:
+            # Prefer hardlink to avoid duplicate disk usage.
+            dst.hardlink_to(src)
+        except Exception:
+            shutil.copy2(src, dst)

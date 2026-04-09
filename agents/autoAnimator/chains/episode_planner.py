@@ -421,7 +421,7 @@ class EpisodePlanner:
             )
 
         strategy_prompt = (
-            "You are the Director orchestrator. Build a concise production strategy as strict JSON.\n"
+            "You are the Director orchestrator. Build a production strategy as strict JSON.\n"
             "Personality in strategy text: sharp, cinematic, occasionally witty, scientifically grounded.\n"
             "Output JSON only: {\"story_arc\":\"...\",\"timeline_strategy\":\"...\",\"resource_strategy\":\"...\",\"visual_prompt_strategy\":\"...\"}\n\n"
             f"BASELINE USER STORY:\n{base_prompt}\n\n"
@@ -436,7 +436,7 @@ class EpisodePlanner:
             f"ART STYLE: {self.art_style}\n"
             f"AESTHETIC GUIDANCE: {self.aesthetic_guidance or 'none'}\n"
             f"MAX CHARACTERS: {self.max_chars}\n"
-            f"TARGET PANELS: {self.max_panels}\n"
+            f"PANEL BUDGET (UP TO): {self.max_panels}\n"
             f"MAX EPISODE DURATION (minutes): {self.max_duration_mins}\n\n"
             f"INPUT PROFILE: {script_profile}\n\n"
             f"FRAME REFERENCES:\n{frame_ref_text}\n\n"
@@ -464,7 +464,7 @@ class EpisodePlanner:
             f"ART STYLE: {self.art_style}\n"
             f"AESTHETIC GUIDANCE: {self.aesthetic_guidance or 'none'}\n"
             f"MAX CHARACTERS: {self.max_chars}\n"
-            f"TARGET PANELS: {self.max_panels}\n"
+            f"PANEL BUDGET (UP TO): {self.max_panels}\n"
             f"MAX EPISODE DURATION (minutes): {self.max_duration_mins}\n\n"
             f"INPUT PROFILE: {script_profile}\n\n"
             f"FRAME REFERENCES:\n{frame_ref_text}\n\n"
@@ -485,6 +485,7 @@ class EpisodePlanner:
             "4b) For short_script/full_script prompts, transform script prose into visual staging, narration lines, and character dialogue.\n"
             "4c) Respect NICHE DIRECTOR CONTEXT as a hard quality/style steering signal when present.\n"
             "4d) Dialogue completeness rule: keep full scene-wise spoken lines; never truncate or abbreviate dialogue text for brevity.\n"
+            "4e) Character naming integrity rule: preserve complete character names from draft/prior context; do not shorten or abbreviate names.\n"
             "5) Keep voice assignments deterministic and valid for TTS.\n"
             "6) Enforce practical render strategy for the available model stack.\n\n"
             "6a) For intense action/image-sequence moments, increase FPS hints within budget-conscious limits.\n"
@@ -497,6 +498,7 @@ class EpisodePlanner:
             "12) Add emotional intent tags per line where useful: sarcastic, happy, overwhelmed, curious, sad, angry, tense, neutral.\n\n"
             "12b) If a spoken line is long, split it into additional lines/panels instead of cutting words from the original intent.\n"
             "12a) Spoken line quality: avoid one-word lines unless it is an intentional reaction beat; keep most spoken lines as natural full phrases (typically 6-18 words).\n"
+            "12c) Spoken clarity rule: each non-reaction spoken line should be grammatically clear, precise, and context-complete (not acronym-only or token-only lines).\n"
             f"13) Niche structural rules:\n{niche_intro_outro_rule or '- Follow the niche rhythm naturally without forcing extra beats.\n'}\n"
             f"13a) Stage-show continuity rules:\n{stage_show_rule or '- Not a stage-show episode.\n'}\n"
             "14) If a panel can intentionally re-use an already generated previous-episode scene (flashback, callback, recap, same location framing), set reuse_from_previous_episode_panel to that prior panel number.\n\n"
@@ -526,8 +528,9 @@ class EpisodePlanner:
         qa_prompt = (
             "You are the Director QA pass. Validate and repair this board for strict schema + resource limits.\n"
             "Return ONLY strict JSON with the SAME schema as input board.\n"
-            f"LIMITS: max_chars={self.max_chars}, target_panels={self.max_panels}, max_duration_mins={self.max_duration_mins}\n"
-            "Use available budget efficiently: if under target_panels, densify beats while keeping coherence and quality.\n"
+            f"LIMITS: max_chars={self.max_chars}, max_panels={self.max_panels}, max_duration_mins={self.max_duration_mins}\n"
+            "Do NOT compress names or dialogue for brevity. Keep full character names and clear complete spoken lines.\n"
+            "Panel count can be below max_panels when needed for dialogue clarity and coherent pacing.\n"
             "If valid, return the board unchanged except minor cleanup.\n\n"
             f"BOARD:\n{json.dumps(directed, ensure_ascii=True)}\n"
         )
@@ -694,7 +697,7 @@ class EpisodePlanner:
             f"{stage_show_planner_rules or '- Not a stage-show episode.\n'}\n"
             f"HARD LIMITS:\n"
             f"- Maximum {self.max_chars} characters (reuse established characters when possible)\n"
-            f"- Target EXACTLY {self.max_panels} panels for high-quality pacing and dynamic movement\n"
+            f"- Panel budget is UP TO {self.max_panels}; prefer coherent pacing over forcing panel count\n"
             f"- Each character's visual_prompt MUST be identical across episodes for image generation consistency\n\n"
             f"LANGUAGE RULES:\n"
             f"- If PRIMARY LANGUAGE HINT is hindi, make dialogue naturally Hindi (Devanagari) unless scene context demands bilingual style.\n"
@@ -703,6 +706,7 @@ class EpisodePlanner:
             f"- Keep full dialogue lines for each scene beat; never truncate or abbreviate line text for brevity.\n"
             f"- Avoid one-word lines except intentional reaction beats.\n"
             f"- Most spoken lines should be complete natural phrases (typically 6-18 words).\n\n"
+            f"- Preserve complete character names exactly as generated; do not shorten names in later panels.\n\n"
             f"Return ONLY strict JSON:\n"
             f"{{\n"
             f'  "episode_number": {next_num},\n'

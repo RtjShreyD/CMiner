@@ -38,6 +38,8 @@ class CloudGen:
         cloud_y: float | None = None,
         cloud_w: float | None = None,
         cloud_h: float | None = None,
+        log_prefix: str = "",
+        use_panel_fps: bool = True,
     ):
         self.fps = fps
         self.resolution = resolution
@@ -55,6 +57,12 @@ class CloudGen:
         self.cloud_y = cloud_y
         self.cloud_w = cloud_w
         self.cloud_h = cloud_h
+        self.log_prefix = (log_prefix or "").strip()
+        self.use_panel_fps = bool(use_panel_fps)
+
+    def _log(self, message: str):
+        prefix = f"{self.log_prefix} " if self.log_prefix else ""
+        print(f"{prefix}{message}")
 
     @staticmethod
     def _audio_duration_seconds(path: Path) -> float:
@@ -75,7 +83,7 @@ class CloudGen:
             return 0.0
 
     def run(self, manga_board: Dict[str, Any], session_dir: Path):
-        print("--- Pipeline: Cloud Generation (OpenCV) ---")
+        self._log("--- Pipeline: Cloud Generation (OpenCV) ---")
         overlays_dir = session_dir / self.overlay_dir_name
         overlays_dir.mkdir(parents=True, exist_ok=True)
         scenes_dir = session_dir / "scenes"
@@ -95,7 +103,7 @@ class CloudGen:
             scene_path = scenes_dir / f"{panel_key}.png"
 
             if not timing_path.exists():
-                print(f"No timing for {panel_key}, skipping clouds.")
+                self._log(f"No timing for {panel_key}, skipping clouds.")
                 continue
 
             with open(timing_path, "r") as f:
@@ -131,13 +139,13 @@ class CloudGen:
                 audio_path = wav_path if wav_path.exists() else audio_path
             total_sec_audio = self._audio_duration_seconds(audio_path) if audio_path.exists() else 0.0
             total_sec = max(total_sec_timing, total_sec_audio)
-            panel_fps = max(8, int(panel.get("fps", self.fps) or self.fps))
+            panel_fps = max(8, int(panel.get("fps", self.fps) or self.fps)) if self.use_panel_fps else max(8, int(self.fps))
             total_frames = max(1, int(np.ceil(total_sec * panel_fps)) + 2)
 
             panel_overlay_dir = overlays_dir / panel_key
             panel_overlay_dir.mkdir(parents=True, exist_ok=True)
 
-            print(f"Generating {total_frames} cloud frames for {panel_key} at {panel_fps} fps")
+            self._log(f"Generating {total_frames} cloud frames for {panel_key} at {panel_fps} fps")
 
             # Sync offset (200_000 units = 20ms advance)
             SYNC_OFFSET = 200_000
@@ -176,7 +184,7 @@ class CloudGen:
                 frame_path = panel_overlay_dir / f"frame_{frame_idx:04d}.png"
                 img.save(frame_path)
 
-        print("Cloud generation complete.")
+        self._log("Cloud generation complete.")
 
     def _assign_character_positions(
         self,

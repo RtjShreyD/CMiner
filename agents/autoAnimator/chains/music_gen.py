@@ -128,18 +128,45 @@ class MusicGen:
 
         out_path = music_dir / "generated_music.mp3"
         if self.music_provider == "lyria":
+            # Lyria Clip model is fixed to 30s per API docs; avoid prompting impossible durations.
+            requested_duration = duration_seconds
+            effective_duration = duration_seconds
+            if "clip" in str(self.lyria_model or "").lower():
+                effective_duration = 30
+            plan["requested_duration_seconds"] = requested_duration
+            plan["effective_duration_seconds"] = effective_duration
+            (music_dir / "music_plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
+            (music_dir / "strudel_plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
+
             music_agent = LyriaMusicAgent(model_name=self.lyria_model)
             if not music_agent.enabled:
                 print("Lyria is not configured; prompt and plan were saved, but no audio file was generated.")
                 return None
-            music_agent.generate_music(
-                out_path=out_path,
-                prompt=prompt_text,
-                duration_seconds=duration_seconds,
-                model_name=self.lyria_model,
-            )
-            print(f"Generated music track with Lyria: {out_path}")
-            return out_path
+            try:
+                music_agent.generate_music(
+                    out_path=out_path,
+                    prompt=prompt_text,
+                    duration_seconds=effective_duration,
+                    model_name=self.lyria_model,
+                    retries=2,
+                    retry_delay_seconds=1.5,
+                )
+                print(f"Generated music track with Lyria: {out_path}")
+                return out_path
+            except Exception as exc:
+                print(f"Lyria generation failed ({exc}). Falling back to Strudel provider when available.")
+                fallback = StrudelMusicAgent()
+                if not fallback.enabled:
+                    print("Strudel fallback is not configured; continuing without generated music audio.")
+                    return None
+                fallback.generate_music(
+                    out_path=out_path,
+                    prompt=prompt_text,
+                    duration_seconds=duration_seconds,
+                    style=style,
+                )
+                print(f"Generated fallback music track with Strudel: {out_path}")
+                return out_path
 
         music_agent = StrudelMusicAgent()
         if not music_agent.enabled:

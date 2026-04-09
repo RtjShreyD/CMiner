@@ -119,7 +119,7 @@ class CharGen:
                         shutil.copy2(src, char_path)
                         manifest[name] = str(char_path)
                         ep_copy = episode_chars_dir / f"char_{safe_name}.png"
-                        shutil.copy2(char_path, ep_copy)
+                        self._mirror_to_episode(char_path, ep_copy)
                         if anchor_path is None:
                             anchor_path = char_path
                         print(f"Reused character image for {name} from {reuse_char}.")
@@ -135,7 +135,7 @@ class CharGen:
                         print(f"Found existing portrait for {name}, skipping.")
                         manifest[name] = str(char_path)
                         ep_copy = episode_chars_dir / f"char_{safe_name}.png"
-                        shutil.copy2(char_path, ep_copy)
+                        self._mirror_to_episode(char_path, ep_copy)
                         if anchor_path is None:
                             anchor_path = char_path
                         continue
@@ -189,7 +189,7 @@ class CharGen:
 
             manifest[name] = str(char_path)
             ep_copy = episode_chars_dir / f"char_{safe_name}.png"
-            shutil.copy2(char_path, ep_copy)
+            self._mirror_to_episode(char_path, ep_copy)
             if anchor_path is None:
                 anchor_path = char_path
 
@@ -222,3 +222,14 @@ class CharGen:
                 print(f"  Resizing from {img.size} to {self.resolution}")
                 img = img.resize(self.resolution, Image.Resampling.LANCZOS)
             img.save(img_path)
+
+    @staticmethod
+    def _mirror_to_episode(src: Path, dst: Path):
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.exists():
+            dst.unlink(missing_ok=True)
+        try:
+            # Prefer hardlink to avoid duplicate disk usage.
+            dst.hardlink_to(src)
+        except Exception:
+            shutil.copy2(src, dst)

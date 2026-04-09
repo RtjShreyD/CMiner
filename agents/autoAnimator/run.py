@@ -1052,6 +1052,8 @@ def main():
                 project_name=project_name,
                 episode_number=ep_num,
                 overlay_dir_name="overlays",
+                log_prefix="[clouds:fullvideo]",
+                use_panel_fps=True,
                 cloud_style=settings.get("cloud_style", "cloud-none"),
                 font_style=settings.get("font_style", "font-geist-sans"),
                 subtitle_style=settings.get("subtitle_style", "sub-clean-bottom"),
@@ -1078,6 +1080,8 @@ def main():
                 project_name=project_name,
                 episode_number=ep_num,
                 overlay_dir_name="overlays_youtube_shorts",
+                log_prefix="[clouds:shorts]",
+                use_panel_fps=False,
                 cloud_style=settings.get("cloud_style", "cloud-none"),
                 font_style=settings.get("font_style", "font-geist-sans"),
                 subtitle_style=settings.get("subtitle_style", "sub-clean-bottom"),
@@ -1113,9 +1117,14 @@ def main():
     if run_music_step:
         print("[step:music] Starting music generation.")
         if enable_music:
+            music_path = None
             if music_future is not None:
-                music_path = music_future.result()
-                print("[step:music] Music generation complete (parallel result).")
+                try:
+                    music_path = music_future.result()
+                    print("[step:music] Music generation complete (parallel result).")
+                except Exception as exc:
+                    print(f"[step:music] Warning: music generation failed in parallel task: {exc}")
+                    music_path = None
             else:
                 from agents.autoAnimator.chains.music_gen import MusicGen
 
@@ -1125,8 +1134,12 @@ def main():
                     lyria_model=args.lyria_model,
                     tracker=tracker,
                 )
-                music_path = music_gen.run(manga_board, session_dir, base_prompt=base_prompt)
-                print("[step:music] Music generation complete.")
+                try:
+                    music_path = music_gen.run(manga_board, session_dir, base_prompt=base_prompt)
+                    print("[step:music] Music generation complete.")
+                except Exception as exc:
+                    print(f"[step:music] Warning: music generation failed: {exc}")
+                    music_path = None
             state.setdefault("episodes", {}).setdefault(str(ep_num), {})["music_generated"] = bool(music_path)
             _save_state(state_path, state)
         else:
@@ -1188,6 +1201,8 @@ def main():
                         project_name=project_name,
                         episode_number=ep_num,
                         overlay_dir_name="overlays_youtube_shorts",
+                        log_prefix="[video:shorts:clouds]",
+                        use_panel_fps=False,
                         cloud_style=settings.get("cloud_style", "cloud-none"),
                         font_style=settings.get("font_style", "font-geist-sans"),
                         subtitle_style=settings.get("subtitle_style", "sub-clean-bottom"),

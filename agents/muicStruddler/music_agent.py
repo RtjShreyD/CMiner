@@ -3,6 +3,7 @@ import subprocess
 import time
 import json
 from pathlib import Path
+from typing import Any
 
 from agents.shared.gemini_compat import make_gemini_client
 
@@ -129,12 +130,57 @@ class LyriaMusicAgent:
             "Keep it suitable as cinematic manga background score."
         )
 
+    @staticmethod
+    def _collect_parts(response: Any) -> list[Any]:
+        parts = []
+        if getattr(response, "parts", None):
+            parts = list(response.parts)
+        elif getattr(response, "candidates", None):
+            for cand in response.candidates or []:
+                content = getattr(cand, "content", None)
+                if content and getattr(content, "parts", None):
+                    parts.extend(content.parts)
+        return parts
+
+    @staticmethod
+    def _extract_audio_and_text(parts: list[Any]) -> tuple[bytes | None, list[str]]:
+        audio_bytes = None
+        text_parts: list[str] = []
+        for part in parts:
+            txt = getattr(part, "text", None)
+            if txt:
+                text_parts.append(str(txt))
+                continue
+            inline_data = getattr(part, "inline_data", None)
+            if inline_data is not None:
+                data = getattr(inline_data, "data", None)
+                if data:
+                    if isinstance(data, (bytes, bytearray, memoryview)):
+                        audio_bytes = bytes(data)
+                    else:
+                        try:
+                            audio_bytes = bytes(data)
+                        except Exception:
+                            audio_bytes = None
+        return audio_bytes, text_parts
+
+    @staticmethod
+    def _candidate_finish_reasons(response: Any) -> list[str]:
+        reasons: list[str] = []
+        for cand in (getattr(response, "candidates", None) or []):
+            reason = getattr(cand, "finish_reason", None)
+            if reason is not None:
+                reasons.append(str(reason))
+        return reasons
+
     def generate_music(
         self,
         out_path: Path,
         prompt: str = "Cinematic background music",
         duration_seconds: int = 60,
         model_name: str | None = None,
+        retries: int = 2,
+        retry_delay_seconds: float = 1.2,
     ) -> Path:
         if not self.enabled:
             raise RuntimeError("Lyria is not available. Check GEMINI_API_KEY and google-genai installation.")
@@ -146,51 +192,56 @@ class LyriaMusicAgent:
         print(f"[Lyria] model={selected_model} duration={duration_seconds}s")
         print(f"[Lyria] prompt: {lyria_prompt}")
 
-        response = self.client.models.generate_content(
-            model=selected_model,
-            contents=lyria_prompt,
-            config=genai_types.GenerateContentConfig(response_modalities=["AUDIO", "TEXT"]),
-        )
+        max_attempts = max(1, int(retries or 0) + 1)
+        last_error = ""
+        for attempt in range(1, max_attempts + 1):
+            # On retries, harden instruction to increase chance of binary audio output.
+            attempt_prompt = lyria_prompt
+            if attempt > 1:
+                attempt_prompt = (
+                    lyria_prompt
+                    + "\n\nReturn music audio bytes in inline_data and avoid text-only outputs."
+                )
 
-        audio_bytes = None
-        text_parts: list[str] = []
+            response = self.client.models.generate_content(
+                model=selected_model,
+                contents=attempt_prompt,
+                config=genai_types.GenerateContentConfig(
+                    response_modalities=["AUDIO", "TEXT"],
+                    response_mime_type="audio/mp3",
+                ),
+            )
 
-        # The SDK may expose parts either on response.parts or candidates[].content.parts.
-        parts = []
-        if getattr(response, "parts", None):
-            parts = list(response.parts)
-        elif getattr(response, "candidates", None):
-            for cand in response.candidates or []:
-                content = getattr(cand, "content", None)
-                if content and getattr(content, "parts", None):
-                    parts.extend(content.parts)
+            parts = self._collect_parts(response)
+            audio_bytes, text_parts = self._extract_audio_and_text(parts)
 
-        for part in parts:
-            txt = getattr(part, "text", None)
-            if txt:
-                text_parts.append(str(txt))
-                continue
-            inline_data = getattr(part, "inline_data", None)
-            if inline_data is not None:
-                data = getattr(inline_data, "data", None)
-                if data:
-                    audio_bytes = bytes(data)
+            if text_parts:
+                print(f"[Lyria] textual output (attempt {attempt}/{max_attempts}):")
+                for block in text_parts:
+                    print(block)
 
-        if text_parts:
-            print("[Lyria] textual output:")
-            for block in text_parts:
-                print(block)
+            if audio_bytes:
+                with open(out_path, "wb") as f:
+                    f.write(audio_bytes)
+                print(f"[Lyria] audio saved to: {out_path}")
+                return out_path
 
-        if not audio_bytes:
+            finish_reasons = self._candidate_finish_reasons(response)
+            parts_count = len(parts)
+            last_error = (
+                "Lyria response did not include inline audio data "
+                f"(attempt {attempt}/{max_attempts}, parts={parts_count}, finish_reasons={finish_reasons or ['unknown']})."
+            )
+            print(f"[Lyria] {last_error}")
+
             # Last-resort debug dump when API shape changes.
             try:
                 print(f"[Lyria] raw response: {json.dumps(getattr(response, 'model_dump', lambda: {})(), default=str)[:2000]}")
             except Exception:
                 print(f"[Lyria] raw response repr: {response}")
-            raise RuntimeError("Lyria response did not include inline audio data.")
 
-        with open(out_path, "wb") as f:
-            f.write(audio_bytes)
-        print(f"[Lyria] audio saved to: {out_path}")
-        return out_path
+            if attempt < max_attempts:
+                time.sleep(max(0.2, float(retry_delay_seconds)))
+
+        raise RuntimeError(last_error or "Lyria response did not include inline audio data.")
 
