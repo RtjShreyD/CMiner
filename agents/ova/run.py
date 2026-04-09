@@ -369,6 +369,10 @@ def main():
             tracker=tracker,
         )
         cloud_gen.run(manga_board, session_dir)
+        # Always reload manifest from disk — cloud_gen updates it with composited image paths.
+        if scenes_manifest_path.exists():
+            with open(scenes_manifest_path, "r") as f:
+                scenes_manifest = json.load(f)
         logger.info("Step clouds complete")
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["clouds_generated"] = True
         _save_state(state_path, state)
@@ -400,7 +404,8 @@ def main():
         logger.info("Step video started")
         from agents.ova.chains.moviemaker import MovieMaker
 
-        if not scenes_manifest and scenes_manifest_path.exists():
+        # Always reload manifest from disk to pick up any cloud-composited paths.
+        if scenes_manifest_path.exists():
             with open(scenes_manifest_path, "r") as f:
                 scenes_manifest = json.load(f)
         if not audio_files:

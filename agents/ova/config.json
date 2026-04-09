@@ -1,7 +1,7 @@
 {
   "models": {
     "planner_model": "models/gemini-flash-latest",
-    "bubble_finder_model": "models/gemini-flash-latest",
+    "bubble_finder_model": "models/gemini-2.5-flash-lite",
     "character_image_model": "models/gemini-2.5-flash-image",
     "scene_image_model": "models/gemini-2.5-flash-image",
     "max_image_requests": 36,

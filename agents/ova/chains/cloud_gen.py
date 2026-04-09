@@ -65,21 +65,38 @@ class CloudGen:
 
         for i, panel in enumerate(storyboard.get("panels", [])):
             panel_key = f"panel_{i:02d}"
-            scene_path_str = manifest.get(panel_key)
-            if not scene_path_str or not Path(scene_path_str).exists():
-                continue
 
-            scene_path = Path(scene_path_str)
+            # Always composite onto the ORIGINAL scene image, never onto a previously
+            # composited _with_speech.png — this prevents bubble stacking on re-runs.
+            original_scene_path = scenes_dir / f"{panel_key}.png"
+            if not original_scene_path.exists():
+                # Fallback: try whatever the manifest has (first-run case where name differs)
+                scene_path_str = manifest.get(panel_key)
+                if not scene_path_str or not Path(scene_path_str).exists():
+                    continue
+                original_scene_path = Path(scene_path_str)
+
             dialogue_lines: List[Dict[str, str]] = panel.get("dialogue", [])
             if not dialogue_lines:
                 continue
 
             cloud_style = panel.get("cloud_style", self.default_cloud_style)
 
-            print(f"  {panel_key}: finding bubble placement ({cloud_style})...")
-            placements = finder.locate(scene_path, dialogue_lines, w, h, cloud_style)
+            # Cache placements to disk — re-runs skip the LLM entirely.
+            placements_cache = scenes_dir / f"{panel_key}_placements.json"
+            if placements_cache.exists():
+                with open(placements_cache) as f_cache:
+                    placements = json.load(f_cache)
+                print(f"  {panel_key}: loaded cached placements ({len(placements)} bubble(s))")
+            else:
+                print(f"  {panel_key}: finding bubble placement ({cloud_style})...")
+                placements = finder.locate(original_scene_path, dialogue_lines, w, h, cloud_style)
+                if not placements:
+                    print(f"  {panel_key}: no placements found, skipping.")
+                    continue
+                placements_cache.write_text(json.dumps(placements, indent=2))
+
             if not placements:
-                print(f"  {panel_key}: no placements found, skipping.")
                 continue
 
             # Build char -> concatenated dialogue text
@@ -90,8 +107,8 @@ class CloudGen:
                 if cn and line:
                     char_text[cn] = (char_text.get(cn, "") + " " + line).strip()
 
-            # Load scene as RGBA
-            scene_pil = Image.open(scene_path).convert("RGBA")
+            # Load ORIGINAL scene as RGBA (never the composited version)
+            scene_pil = Image.open(original_scene_path).convert("RGBA")
             if scene_pil.size != (w, h):
                 scene_pil = scene_pil.resize((w, h), Image.Resampling.LANCZOS)
 
