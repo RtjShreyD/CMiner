@@ -123,8 +123,10 @@ class SceneGen:
                 f"Camera: {camera}. Mood: {mood}. "
                 f"Characters in scene: {chars_in_scene}. "
                 f"Art style: {self.art_style}. "
-                "Mandatory: include clearly visible manga speech bubbles and expression clouds in-frame. "
-                "Speech bubbles should be white/bright with dark outlines and large enough for text patching. "
+                "IMPORTANT: Include ONLY manga expression/reaction elements in-scene: sweat drops, sparkle bursts, "
+                "anger marks, thought wisps, motion lines. "
+                "DO NOT draw any speech bubbles or dialogue text boxes in the image — "
+                "those will be added programmatically as overlays. "
                 f"CRITICAL: {width}:{height} aspect (exact {width}x{height}) resolution."
             )
 

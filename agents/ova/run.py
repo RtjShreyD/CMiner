@@ -273,9 +273,9 @@ def main():
                 tracker.save(session_dir)
             return
     else:
-        manga_board = _load_manga_board(session_dir, args.episode)
+        manga_board = _load_storyboard(session_dir, args.episode)
         if manga_board is None:
-            print("Error: No manga-board.json found. Run 'planner' step first.")
+            print("Error: No storyboard.json found. Run 'planner' step first.")
             sys.exit(1)
 
     ep_num = manga_board.get("episode_number", 1)
@@ -356,14 +356,17 @@ def main():
         from agents.ova.chains.cloud_gen import CloudGen
 
         settings = state.get("settings", {})
+        models_cfg = config.get("models", {})
         cloud_gen = CloudGen(
+            bubble_finder_model=models_cfg.get("bubble_finder_model", planner_model),
             fps=fps,
             resolution=resolution,
-            cloud_style=settings.get("cloud_style", "cloud-none"),
+            cloud_style=settings.get("cloud_style", "speech"),
             font_style=settings.get("font_style", "font-geist-sans"),
             subtitle_style=settings.get("subtitle_style", "sub-clean-bottom"),
             narration_mode=settings.get("narration_mode", "hybrid_subtitles_clouds"),
             subtitle_scale=float(settings.get("subtitle_scale", 1.0) or 1.0),
+            tracker=tracker,
         )
         cloud_gen.run(manga_board, session_dir)
         logger.info("Step clouds complete")
@@ -447,13 +450,13 @@ def _save_state(state_path: Path, state: dict):
         json.dump(state, f, indent=2)
 
 
-def _load_manga_board(session_dir: Path, episode_num: int = None) -> dict | None:
+def _load_storyboard(session_dir: Path, episode_num: int = None) -> dict | None:
     episodes_dir = session_dir / "episodes"
     if not episodes_dir.exists():
         return None
 
     if episode_num:
-        board_path = episodes_dir / f"episode{episode_num}" / "manga-board.json"
+        board_path = episodes_dir / f"episode{episode_num}" / "storyboard.json"
         if board_path.exists():
             with open(board_path, "r") as f:
                 return json.load(f)
@@ -464,7 +467,7 @@ def _load_manga_board(session_dir: Path, episode_num: int = None) -> dict | None
         key=lambda p: p.name,
     )
     if existing:
-        board_path = existing[-1] / "manga-board.json"
+        board_path = existing[-1] / "storyboard.json"
         if board_path.exists():
             with open(board_path, "r") as f:
                 return json.load(f)

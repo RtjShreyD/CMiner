@@ -63,12 +63,15 @@ class EpisodePlanner:
             f"- EXACTLY {self.max_panels} panels\n"
             f"- Target total runtime >= {target_seconds} seconds\n"
             f"- Each panel duration_seconds must be >= {min_panel_duration}\n"
-            "- Episode 1 must include show intro first, then judges introduction (Brahma, Vishnu, Mahadev), then invention pitch\n"
+            "- Episode 1 is a SHOW INTRO ONLY — no invention pitch, no contestant. Structure: "
+            "epic stage reveal → host Zara Nova intro → show concept explained → Brahma entrance → "
+            "Vishnu entrance → Mahesh/Shiva entrance → dramatic 'TO BE CONTINUED...' closing frame.\n"
             "- Brahma, Vishnu, Mahesh must be visually recognizable through canonical symbols while styled modern-futuristic:\n"
             "  Brahma: serene elder with four-headed motif symbolism, Vedic scholar aura, modern ceremonial tech robe.\n"
             "  Vishnu: calm protector presence with shankha/chakra symbolism, royal blue-gold futuristic attire.\n"
             "  Mahesh (Shiva): ash-toned ascetic energy, trishul/rudraksha motifs, modern cosmic streetwear armor blend.\n"
-            "- In scene_description, ALWAYS include explicit instruction for manga/comic speech and expression clouds to be visible\n"
+            "- In scene_description, generate ONLY expression/reaction clouds (sweat drops, anger marks, sparkles, thought wisps)\n"
+            "  DO NOT include any speech bubbles in scene images — speech bubbles will be added programmatically later.\n"
             "- Keep characters and objects visually consistent in all frames\n"
             "- Dialogue must be coherent and meaningful in one language (English)\n"
             "- assigned_voice must be a valid voice key from VOICE POOL\n\n"
@@ -91,7 +94,8 @@ class EpisodePlanner:
             "      \"panel_number\": 1,\n"
             "      \"characters_present\": [\"Name\"],\n"
             "      \"dialogue\": [{\"character\": \"Name\", \"line\": \"line\"}],\n"
-            "      \"scene_description\": \"detailed composition + include visible manga speech/expression clouds\",\n"
+            "      \"cloud_style\": \"speech|shout|thought|caption\",\n"
+            "      \"scene_description\": \"detailed composition — expression reaction clouds only (sweat drops, sparkles, anger marks), absolutely NO speech bubbles\",\n"
             "      \"camera_angle\": \"close-up|medium-shot|wide-shot|birds-eye|low-angle\",\n"
             "      \"mood\": \"tense|calm|dramatic|humorous|melancholic|action\",\n"
             f"      \"duration_seconds\": {min_panel_duration}\n"
@@ -130,7 +134,7 @@ class EpisodePlanner:
 
         ep_dir = episodes_dir / f"episode{next_num}"
         ep_dir.mkdir(parents=True, exist_ok=True)
-        out = ep_dir / "manga-board.json"
+        out = ep_dir / "storyboard.json"
         out.write_text(json.dumps(board, indent=2))
 
         print(f"Episode {next_num} planned: {board.get('episode_title', 'Untitled')}")
