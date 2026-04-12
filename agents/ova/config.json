@@ -1,0 +1,83 @@
+{
+  "defaults": {
+    "subtitle_style": "sub-clean-bottom",
+    "narration_mode": "hybrid_subtitles_clouds",
+    "subtitle_scale": 1.0,
+    "font_style": "font-geist-sans"
+  },
+  "models": {
+    "planner_model": "models/gemini-flash-latest",
+    "character_image_model": "models/gemini-2.5-flash-image",
+    "scene_image_model": "models/gemini-2.5-flash-image",
+    "max_image_requests": 36,
+    "max_chars_per_episode": 6,
+    "max_panels_per_episode": 20,
+    "max_episode_duration_mins": 2
+  },
+  "voice_profiles": {
+    "narrator": ["en-US-AriaNeural", "en-GB-SoniaNeural"],
+    "hero": ["en-US-ChristopherNeural"],
+    "villain": ["en-GB-RyanNeural"],
+    "support": ["en-IN-NeerjaNeural", "hi-IN-SwaraNeural"]
+  },
+  "video": {
+    "resolution": [1920, 1080],
+    "fps": 24,
+    "target_duration_mins": 2
+  },
+  "art_style": "cinematic anime, atmospheric lighting, detailed linework, consistent character design, seinen manga aesthetic with dramatic color palette",
+  "themes": {
+    "scary_stories": "A dark, suspenseful script with cliffhangers, ominous imagery, and intense reveal moments.",
+    "mystery_adventure": "A mystery/adventure tone with curiosity-driven hook, plot twists, and structured reveal.",
+    "slice_of_life": "A warm, calm slice-of-life narrative with relatable character moments and gentle humour.",
+    "magic_show": "A theatrical magic-show narrative with wonder, misdirection, reveal beats, and crowd reactions.",
+    "sci_fi_epic": "A sweeping sci-fi tone with futuristic worldbuilding, high-stakes conflict, and awe-driven discoveries.",
+    "comedy_sketch": "A light comedy rhythm with witty banter, situational humor, and punchline-driven scene transitions.",
+    "cartoon_adventure": "A playful cartoon-adventure tone with exaggerated action, bright emotional swings, and family-friendly fun.",
+    "ghibli_wonder": "A gentle, whimsical tone inspired by pastoral wonder, emotional intimacy, and environmental magic."
+  },
+  "art_styles": {
+    "cinematic_anime": "cinematic anime, high detail, dynamic dramatic composition, volumetric lighting",
+    "noir_comic": "black-and-white noir comic, textured inking, strong contrast, moody lighting",
+    "sci_fi_neon": "neon sci-fi, futuristic cityscape, high saturation chromatic highlights",
+    "horror_manga": "horror manga, gritty shadows, dramatic facial expressions, eerie atmosphere",
+    "magic_illusion_stage": "fantasy magic-show stage aesthetic, luminous spell effects, velvet curtains, theatrical spotlighting",
+    "comedy_cartoon": "clean cartoon linework, expressive faces, comedic timing poses, bright saturated color palette",
+    "ghibli_watercolor": "soft hand-painted watercolor anime style, warm natural lighting, lush backgrounds, whimsical atmosphere",
+    "retro_pop_comic": "retro pop comic halftone textures, bold outlines, dynamic captions, vibrant primary colors",
+    "space_opera_cinematic": "space-opera cinematic concept art, nebula backdrops, epic framing, dramatic rim lighting"
+  },
+  "output_presets": {
+    "tiktok": {"resolution": [1080, 1920], "fps": 30, "duration_mins": 1, "aspect": "9:16"},
+    "instagram_reels": {"resolution": [1080, 1920], "fps": 30, "duration_mins": 1, "aspect": "9:16"},
+    "youtube_shorts": {"resolution": [1080, 1920], "fps": 30, "duration_mins": 1, "aspect": "9:16"},
+    "youtube_widescreen": {"resolution": [1920, 1080], "fps": 30, "duration_mins": 5, "aspect": "16:9"}
+  },
+  "tts_voices_pool": {
+    "narrator": ["en-US-AriaNeural", "en-GB-SoniaNeural"],
+    "hero": ["en-US-ChristopherNeural"],
+    "villain": ["en-GB-RyanNeural"],
+    "support": ["en-IN-NeerjaNeural", "hi-IN-SwaraNeural"]
+  },
+  "prompts": {
+    "episode_planner": {
+      "system": "You are the DIRECTOR for an anime-comic automated animation pipeline.\nYour output is consumed by downstream generators and MUST be strictly machine-usable.",
+      "episode_1_structure": "Epic stage reveal → host Zara Nova intro → show concept explained → Brahma entrance → Vishnu entrance → Mahesh/Shiva entrance → dramatic 'TO BE CONTINUED...' closing frame.",
+      "character_style_rules": "Brahma: serene elder with four-headed motif symbolism, Vedic scholar aura, modern ceremonial tech robe.\nVishnu: calm protector presence with shankha/chakra symbolism, royal blue-gold futuristic attire.\nMahesh (Shiva): ash-toned ascetic energy, trishul/rudraksha motifs, modern cosmic streetwear armor blend.",
+      "scene_description_rule": "In scene_description, generate ONLY expression/reaction clouds (sweat drops, anger marks, sparkles, thought wisps). DO NOT include any speech bubbles in scene images — speech bubbles will be added programmatically later.",
+      "hard_rules_extra": "Keep characters and objects visually consistent in all frames.\nDialogue must be coherent and meaningful in one language (English).\nassigned_voice must be a valid voice key from VOICE POOL.",
+      "no_continuity_note": "NO CONTINUITY MODE: Do not reuse prior episode names, events, or carry-forward context."
+    },
+    "char_gen": {
+      "portrait_prompt": "A full-body character portrait for manga. {visual_prompt}. Art style: {art_style}. Clean background, professional character sheet style. CRITICAL: {width}:{height} aspect (exact {width}x{height}) resolution.",
+      "anchor_prefix": "Generate a NEW character in the EXACT same art style. "
+    },
+    "scene_gen": {
+      "panel_prompt": "A cinematic manga panel. {scene_desc}. Camera: {camera}. Mood: {mood}. Characters in scene: {chars_in_scene}. Art style: {art_style}. IMPORTANT: Include ONLY manga expression/reaction elements in-scene: sweat drops, sparkle bursts, anger marks, thought wisps, motion lines. DO NOT draw any speech bubbles or dialogue text boxes in the image — those will be added programmatically as overlays. CRITICAL: {width}:{height} aspect (exact {width}x{height}) resolution."
+    },
+    "music_gen": {
+      "system": "You are a film music composer for short manga episodes.\nCreate a compact background music direction for score generation.\nAvoid lyrics and vocals. Focus on atmosphere and pacing.",
+      "user_template": "BASE STORY PROMPT:\n{base_prompt}\n\nSTORYBOARD CONTEXT:\n{storyboard_digest}\n\nReturn ONLY strict JSON with this schema:\n{{\n  \"music_prompt\": \"short but vivid music direction, include instrumentation + tempo arc\",\n  \"style\": \"ambient\",\n  \"duration_seconds\": 120\n}}\nstyle must be one of: ambient, cinematic, lo-fi, electronic."
+    }
+  }
+}
