@@ -24,12 +24,14 @@ class SceneGen:
         resolution: Tuple[int, int] = (1280, 720),
         art_style: str = "cinematic anime",
         tracker: Optional[OVALLMTracker] = None,
+        prompt_config: Dict[str, Any] | None = None,
     ):
         self.image_model_name = image_model_name
         self.max_generations = max_generations
         self.resolution = resolution
         self.art_style = art_style
         self.tracker = tracker
+        self.prompt_config = prompt_config or {}
 
     @staticmethod
     def _extract_inline_image_bytes(response: Any) -> bytes | None:
@@ -118,16 +120,26 @@ class SceneGen:
             chars_in_scene = "; ".join(char_snippets) if char_snippets else "No specific characters"
 
             width, height = self.resolution
-            prompt = (
-                f"A cinematic manga panel. {scene_desc}. "
-                f"Camera: {camera}. Mood: {mood}. "
-                f"Characters in scene: {chars_in_scene}. "
-                f"Art style: {self.art_style}. "
+            template = self.prompt_config.get(
+                "panel_prompt",
+                "A cinematic manga panel. {scene_desc}. "
+                "Camera: {camera}. Mood: {mood}. "
+                "Characters in scene: {chars_in_scene}. "
+                "Art style: {art_style}. "
                 "IMPORTANT: Include ONLY manga expression/reaction elements in-scene: sweat drops, sparkle bursts, "
                 "anger marks, thought wisps, motion lines. "
                 "DO NOT draw any speech bubbles or dialogue text boxes in the image — "
                 "those will be added programmatically as overlays. "
-                f"CRITICAL: {width}:{height} aspect (exact {width}x{height}) resolution."
+                "CRITICAL: {width}:{height} aspect (exact {width}x{height}) resolution.",
+            )
+            prompt = template.format(
+                scene_desc=scene_desc,
+                camera=camera,
+                mood=mood,
+                chars_in_scene=chars_in_scene,
+                art_style=self.art_style,
+                width=width,
+                height=height,
             )
 
             print(f"Generating ({gen_count + 1}/{self.max_generations}): {panel_key} ({camera}, {mood})")

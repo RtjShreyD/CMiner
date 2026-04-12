@@ -23,11 +23,13 @@ class MusicGen:
         music_provider: str = "strudel",
         lyria_model: str = "lyria-3-clip-preview",
         tracker: Optional[LLMTracker] = None,
+        prompt_config: Dict[str, Any] | None = None,
     ):
         self.model_name = model_name
         self.music_provider = (music_provider or "strudel").strip().lower()
         self.lyria_model = lyria_model
         self.tracker = tracker
+        self.prompt_config = prompt_config or {}
 
     def _build_storyboard_digest(self, manga_board: Dict[str, Any]) -> str:
         title = manga_board.get("episode_title", "Untitled episode")
@@ -60,19 +62,31 @@ class MusicGen:
 
         storyboard_digest = self._build_storyboard_digest(manga_board)
 
-        llm_prompt = (
+        pc = self.prompt_config
+        system_text = pc.get(
+            "system",
             "You are a film music composer for short manga episodes.\n"
             "Create a compact background music direction for score generation.\n"
-            "Avoid lyrics and vocals. Focus on atmosphere and pacing.\n\n"
-            f"BASE STORY PROMPT:\n{base_prompt}\n\n"
-            f"STORYBOARD CONTEXT:\n{storyboard_digest}\n\n"
+            "Avoid lyrics and vocals. Focus on atmosphere and pacing.",
+        )
+        user_template = pc.get(
+            "user_template",
+            "BASE STORY PROMPT:\n{base_prompt}\n\n"
+            "STORYBOARD CONTEXT:\n{storyboard_digest}\n\n"
             "Return ONLY strict JSON with this schema:\n"
-            "{\n"
+            "{{\n"
             "  \"music_prompt\": \"short but vivid music direction, include instrumentation + tempo arc\",\n"
             "  \"style\": \"ambient\",\n"
             "  \"duration_seconds\": 120\n"
-            "}\n"
-            "style must be one of: ambient, cinematic, lo-fi, electronic.\n"
+            "}}\n"
+            "style must be one of: ambient, cinematic, lo-fi, electronic.",
+        )
+        llm_prompt = (
+            f"{system_text}\n\n"
+            + user_template.format(
+                base_prompt=base_prompt,
+                storyboard_digest=storyboard_digest,
+            )
         )
 
         text = ""

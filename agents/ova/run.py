@@ -35,7 +35,7 @@ def main():
     parser.add_argument("--prompt", help="Override base prompt (otherwise reads prompt.txt)")
     parser.add_argument(
         "--step",
-        choices=["all", "planner", "chars", "scenes", "audio", "clouds", "music", "video"],
+        choices=["all", "planner", "chars", "scenes", "audio", "music", "video"],
         default="all",
         help="Execute a specific pipeline step",
     )
@@ -57,11 +57,8 @@ def main():
     parser.add_argument("--max_episode_duration_mins", type=int, help="Maximum episode duration minutes")
     parser.add_argument("--resolution_w", type=int, help="Override output resolution width")
     parser.add_argument("--resolution_h", type=int, help="Override output resolution height")
-    parser.add_argument("--cloud_style", help="Cloud style id from buildpack")
     parser.add_argument("--font_style", help="Font style id from buildpack")
     parser.add_argument("--subtitle_style", help="Subtitle style id from buildpack")
-    parser.add_argument("--narration_mode", help="Narration mode from buildpack")
-    parser.add_argument("--subtitle_scale", type=float, help="Subtitle scale from buildpack")
     parser.add_argument("--planner_model", help="Override planner model name")
     parser.add_argument("--character_image_model", help="Override character image model name")
     parser.add_argument("--scene_image_model", help="Override scene image model name")
@@ -85,7 +82,7 @@ def main():
     parser.add_argument(
         "--develop",
         action="store_true",
-        help="When used with --episodes continue, also runs generation chains (chars/scenes/audio/clouds/video)",
+        help="When used with --episodes continue, also runs generation chains (chars/scenes/audio/video)",
     )
     parser.add_argument("--episode", type=int, help="Target a specific episode number (for re-runs)")
     args = parser.parse_args()
@@ -140,6 +137,8 @@ def main():
     if args.scene_image_model:
         scene_image_model = args.scene_image_model
     tts_voices_pool = config.get("tts_voices_pool", {})
+    prompts_config = config.get("prompts", {})
+    config_defaults = config.get("defaults", {})
 
     # Style/theme presets
     themes = config.get("themes", {})
@@ -204,11 +203,8 @@ def main():
         "max_chars_per_episode": max_chars,
         "max_panels_per_episode": max_panels,
         "max_episode_duration_mins": max_duration,
-        "cloud_style": args.cloud_style or "cloud-none",
-        "font_style": args.font_style or "font-geist-sans",
-        "subtitle_style": args.subtitle_style or "sub-clean-bottom",
-        "narration_mode": args.narration_mode or "hybrid_subtitles_clouds",
-        "subtitle_scale": args.subtitle_scale if args.subtitle_scale is not None else 1.0,
+        "font_style": args.font_style or config_defaults.get("font_style", "font-geist-sans"),
+        "subtitle_style": args.subtitle_style or config_defaults.get("subtitle_style", "sub-clean-bottom"),
         "episode_mode": args.episode_mode == "true",
         "target_duration_mins": target_duration,
         "target_duration_seconds": int(target_duration * 60),
@@ -241,6 +237,11 @@ def main():
         logger.info("Step planner started")
         from agents.ova.chains.episode_planner import EpisodePlanner
 
+        # Auto-derive next episode number when continuing without explicit --episode flag
+        target_episode = args.episode
+        if target_episode is None and args.episodes == "continue":
+            target_episode = state.get("latest_episode", 0) + 1
+
         planner = EpisodePlanner(
             model_name=planner_model,
             tts_voices_pool=tts_voices_pool,
@@ -250,8 +251,9 @@ def main():
             art_style=art_style,
             theme=resolved_theme,
             episode_mode=(args.episode_mode == "true"),
-            target_episode=args.episode,
+            target_episode=target_episode,
             tracker=tracker,
+            prompt_config=prompts_config.get("episode_planner", {}),
         )
         manga_board = planner.run(base_prompt, session_dir)
         logger.info("Step planner complete | episode=%s panels=%s chars=%s", manga_board.get("episode_number"), len(manga_board.get("panels", [])), len(manga_board.get("characters", [])))
@@ -301,6 +303,7 @@ def main():
             resolution=resolution,
             art_style=art_style,
             tracker=tracker,
+            prompt_config=prompts_config.get("char_gen", {}),
         )
         char_manifest = char_gen.run(manga_board, session_dir)
         logger.info("Step chars complete | generated=%s", len(char_manifest))
@@ -323,6 +326,7 @@ def main():
             resolution=resolution,
             art_style=art_style,
             tracker=tracker,
+            prompt_config=prompts_config.get("scene_gen", {}),
         )
         scenes_manifest = scene_gen.run(manga_board, char_manifest, session_dir)
         logger.info("Step scenes complete | generated=%s", len(scenes_manifest))
@@ -350,34 +354,7 @@ def main():
             + [str(p) for p in audio_dir.glob("panel_*.wav")]
         )
 
-    # ── 5. Cloud Generation (OpenCV – no LLM) ────────────────
-    if args.step in ["all", "clouds"] or (run_generation and not run_specific_step):
-        logger.info("Step clouds started")
-        from agents.ova.chains.cloud_gen import CloudGen
-
-        settings = state.get("settings", {})
-        models_cfg = config.get("models", {})
-        cloud_gen = CloudGen(
-            bubble_finder_model=models_cfg.get("bubble_finder_model", planner_model),
-            fps=fps,
-            resolution=resolution,
-            cloud_style=settings.get("cloud_style", "speech"),
-            font_style=settings.get("font_style", "font-geist-sans"),
-            subtitle_style=settings.get("subtitle_style", "sub-clean-bottom"),
-            narration_mode=settings.get("narration_mode", "hybrid_subtitles_clouds"),
-            subtitle_scale=float(settings.get("subtitle_scale", 1.0) or 1.0),
-            tracker=tracker,
-        )
-        cloud_gen.run(manga_board, session_dir)
-        # Always reload manifest from disk — cloud_gen updates it with composited image paths.
-        if scenes_manifest_path.exists():
-            with open(scenes_manifest_path, "r") as f:
-                scenes_manifest = json.load(f)
-        logger.info("Step clouds complete")
-        state.setdefault("episodes", {}).setdefault(str(ep_num), {})["clouds_generated"] = True
-        _save_state(state_path, state)
-
-    # ── 6. Music Generation (optional) ───────────────────────
+    # ── 5. Music Generation (optional) ───────────────────────
     if args.step in ["all", "music"] or (run_generation and not run_specific_step):
         logger.info("Step music started")
         if enable_music:
@@ -388,6 +365,7 @@ def main():
                 music_provider=args.music_provider,
                 lyria_model=args.lyria_model,
                 tracker=tracker,
+                prompt_config=prompts_config.get("music_gen", {}),
             )
             music_path = music_gen.run(manga_board, session_dir, base_prompt=base_prompt)
             state.setdefault("episodes", {}).setdefault(str(ep_num), {})["music_generated"] = bool(music_path)
@@ -404,7 +382,7 @@ def main():
         logger.info("Step video started")
         from agents.ova.chains.moviemaker import MovieMaker
 
-        # Always reload manifest from disk to pick up any cloud-composited paths.
+        # Always reload manifest from disk before rendering.
         if scenes_manifest_path.exists():
             with open(scenes_manifest_path, "r") as f:
                 scenes_manifest = json.load(f)
@@ -414,11 +392,14 @@ def main():
                 + [str(p) for p in audio_dir.glob("panel_*.wav")]
             )
 
+        settings = state.get("settings", {})
         maker = MovieMaker(
             fps=fps,
             resolution=resolution,
             enable_music=enable_music,
             target_duration_seconds=int(target_duration * 60),
+            font_style=settings.get("font_style", "font-geist-sans"),
+            subtitle_style=settings.get("subtitle_style", config_defaults.get("subtitle_style", "sub-clean-bottom")),
         )
         final_video = maker.run(manga_board, scenes_manifest, audio_files, session_dir)
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["status"] = "complete"
@@ -460,22 +441,23 @@ def _load_storyboard(session_dir: Path, episode_num: int = None) -> dict | None:
     if not episodes_dir.exists():
         return None
 
-    if episode_num:
-        board_path = episodes_dir / f"episode{episode_num}" / "storyboard.json"
-        if board_path.exists():
-            with open(board_path, "r") as f:
-                return json.load(f)
+    def _try_load(ep_dir: Path) -> dict | None:
+        for name in ("storyboard.json", "manga-board.json"):
+            p = ep_dir / name
+            if p.exists():
+                with open(p, "r") as f:
+                    return json.load(f)
         return None
+
+    if episode_num:
+        return _try_load(episodes_dir / f"episode{episode_num}")
 
     existing = sorted(
         [d for d in episodes_dir.iterdir() if d.is_dir() and d.name.startswith("episode")],
         key=lambda p: p.name,
     )
     if existing:
-        board_path = existing[-1] / "storyboard.json"
-        if board_path.exists():
-            with open(board_path, "r") as f:
-                return json.load(f)
+        return _try_load(existing[-1])
     return None
 
 

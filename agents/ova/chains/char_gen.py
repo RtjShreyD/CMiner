@@ -24,20 +24,29 @@ class CharGen:
         resolution: Tuple[int, int] = (1280, 720),
         art_style: str = "cinematic anime",
         tracker: Optional[OVALLMTracker] = None,
+        prompt_config: Dict[str, Any] | None = None,
     ):
         self.image_model_name = image_model_name
         self.max_generations = max_generations
         self.resolution = resolution
         self.art_style = art_style
         self.tracker = tracker
+        self.prompt_config = prompt_config or {}
 
     def _build_prompt(self, visual_prompt: str) -> str:
         width, height = self.resolution
-        return (
-            f"A full-body character portrait for manga. {visual_prompt}. "
-            f"Art style: {self.art_style}. "
-            f"Clean background, professional character sheet style. "
-            f"CRITICAL: {width}:{height} aspect (exact {width}x{height}) resolution."
+        template = self.prompt_config.get(
+            "portrait_prompt",
+            "A full-body character portrait for manga. {visual_prompt}. "
+            "Art style: {art_style}. "
+            "Clean background, professional character sheet style. "
+            "CRITICAL: {width}:{height} aspect (exact {width}x{height}) resolution.",
+        )
+        return template.format(
+            visual_prompt=visual_prompt,
+            art_style=self.art_style,
+            width=width,
+            height=height,
         )
 
     @staticmethod
@@ -118,12 +127,16 @@ class CharGen:
                     if anchor_path and anchor_path.exists():
                         with open(anchor_path, "rb") as f:
                             anchor_bytes = f.read()
+                        anchor_prefix = self.prompt_config.get(
+                            "anchor_prefix",
+                            "Generate a NEW character in the EXACT same art style. ",
+                        )
                         response = llm_call(
                             self.tracker,
                             model,
                             [
                                 {"mime_type": "image/png", "data": anchor_bytes},
-                                f"Generate a NEW character in the EXACT same art style. {prompt}",
+                                f"{anchor_prefix}{prompt}",
                             ],
                             purpose="char_gen",
                         )
