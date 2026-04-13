@@ -4,14 +4,17 @@ import axios from 'axios';
 import { useNavigate, useParams } from 'react-router-dom';
 import SessionTreeView from '../components/SessionTreeView';
 import FilePreviewPane from '../components/FilePreviewPane';
+import OvaWorkspace from './OvaWorkspace';
 
 const API_BASE = 'http://localhost:8000/api';
 const WS_BASE = 'ws://localhost:8000/api';
 const MEDIA_BASE = 'http://localhost:8000/media';
 const LIBRARY_MEDIA_BASE = 'http://localhost:8000/library-media';
 const PIPELINE_START_TIME_KEY = 'autoanimator.pipelineStartTimeBySession';
+const PIPELINE_END_TIME_KEY = 'autoanimator.pipelineEndTimeBySession';
 const AGENTS_LIST = [
   { id: 'autoAnimator', name: 'AutoAnimator', desc: 'Focused preview-driven animator powered by Narrative Manga backend.' },
+  { id: 'ova', name: 'OVA Agent', desc: 'Cinematic anime OVA pipeline — subtitle-only rendering, full episodic continuity.' },
 ];
 const AUTOANIMATOR_TEMPLATE_SESSION_ID = '1392763';
 const VALID_AGENT_IDS = new Set(AGENTS_LIST.map((a) => a.id));
@@ -85,9 +88,19 @@ export default function Agents() {
   const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState([]);
   const [jobId, setJobId] = useState(null);
+  const JOB_ID_STORAGE_KEY = 'autoanimator_job_id';
   const [pipelineStartBySession, setPipelineStartBySession] = useState(() => {
     try {
       const raw = window.localStorage.getItem(PIPELINE_START_TIME_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+  const [pipelineEndBySession, setPipelineEndBySession] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem(PIPELINE_END_TIME_KEY);
       const parsed = raw ? JSON.parse(raw) : {};
       return parsed && typeof parsed === 'object' ? parsed : {};
     } catch {
@@ -112,6 +125,9 @@ export default function Agents() {
   const [plannerThemes, setPlannerThemes] = useState({});
   const [plannerArtStyles, setPlannerArtStyles] = useState({});
   const [plannerNiches, setPlannerNiches] = useState({});
+  const [plannerSkillsCatalog, setPlannerSkillsCatalog] = useState({});
+  const [plannerSkillIds, setPlannerSkillIds] = useState([]);
+  const [plannerSkillPrompt, setPlannerSkillPrompt] = useState('');
   const [format, setFormat] = useState('youtube_widescreen');
   const [cloudStyle, setCloudStyle] = useState('cloud-fluffy-default');
   const [fontStyle, setFontStyle] = useState('font-inter-clean');
@@ -121,6 +137,7 @@ export default function Agents() {
   const [reuseSessionChars, setReuseSessionChars] = useState(false);
   const [selectedSessionCharacter, setSelectedSessionCharacter] = useState('');
   const [enableMusic, setEnableMusic] = useState(true);
+  const [createBanner, setCreateBanner] = useState(false);
   const [musicProvider, setMusicProvider] = useState('lyria');
   const [lyriaModel, setLyriaModel] = useState('lyria-3-clip-preview');
   const [ttsProvider, setTtsProvider] = useState('edge');
@@ -162,6 +179,7 @@ export default function Agents() {
   const [stepReset, setStepReset] = useState({ planner: false, chars: false, scenes: false, audio: false, texts: false, music: false, video: false });
   const [episodesMode, setEpisodesMode] = useState('new');
   const [episodeMode, setEpisodeMode] = useState(true);
+  const [introOnly, setIntroOnly] = useState(true);
   const [targetEpisode, setTargetEpisode] = useState('');
   const [sourceCharSession, setSourceCharSession] = useState('');
   const [sourceCharPath, setSourceCharPath] = useState('');
@@ -174,6 +192,7 @@ export default function Agents() {
   const [charsModel, setCharsModel] = useState('models/gemini-2.5-flash-image');
   const [scenesModel, setScenesModel] = useState('models/gemini-2.5-flash-image');
   const [charPromptItems, setCharPromptItems] = useState([]);
+  const [objectPromptItems, setObjectPromptItems] = useState([]);
   const [charRedoBusy, setCharRedoBusy] = useState('');
   const [toasts, setToasts] = useState([]);
   const [sectionLocks, setSectionLocks] = useState({
@@ -203,6 +222,21 @@ export default function Agents() {
       const next = { ...prev, [p]: ts };
       try {
         window.localStorage.setItem(PIPELINE_START_TIME_KEY, JSON.stringify(next));
+      } catch {
+        // Ignore localStorage errors.
+      }
+      return next;
+    });
+  };
+
+  const setSessionPipelineEndTime = (path, isoTs) => {
+    const p = String(path || '').trim();
+    const ts = String(isoTs || '').trim();
+    if (!p || !ts) return;
+    setPipelineEndBySession((prev) => {
+      const next = { ...prev, [p]: ts };
+      try {
+        window.localStorage.setItem(PIPELINE_END_TIME_KEY, JSON.stringify(next));
       } catch {
         // Ignore localStorage errors.
       }
@@ -284,6 +318,8 @@ export default function Agents() {
     setProjectName('');
     setProjectNameUserEdited(false);
     setNiche('auto-select');
+    setPlannerSkillIds([]);
+    setPlannerSkillPrompt('');
     setPresetPrompt('');
     setStartFrameFile(null);
     setEndFrameFile(null);
@@ -331,6 +367,8 @@ export default function Agents() {
     if (typeof settings?.theme === 'string' && settings.theme.trim()) setTheme(settings.theme);
     if (typeof settings?.preset === 'string' && settings.preset.trim()) setPreset(settings.preset);
     if (typeof settings?.niche === 'string' && settings.niche.trim()) setNiche(settings.niche);
+    if (Array.isArray(settings?.planner_skill_ids)) setPlannerSkillIds(settings.planner_skill_ids.filter((v) => typeof v === 'string' && v.trim()));
+    if (typeof settings?.planner_skill_prompt === 'string') setPlannerSkillPrompt(settings.planner_skill_prompt);
     if (typeof settings?.format === 'string' && settings.format.trim()) setFormat(settings.format);
     if (typeof settings?.planner_model === 'string' && settings.planner_model.trim()) setPlannerModel(settings.planner_model);
     if (typeof settings?.character_image_model === 'string' && settings.character_image_model.trim()) setCharsModel(settings.character_image_model);
@@ -344,14 +382,22 @@ export default function Agents() {
     if (typeof settings?.subtitle_style === 'string' && settings.subtitle_style.trim()) setBuildpackSubtitleStyle(settings.subtitle_style);
     if (typeof settings?.subtitle_scale === 'number') setSubtitleScale(settings.subtitle_scale);
     if (typeof settings?.enable_music === 'boolean') setEnableMusic(settings.enable_music);
+    if (typeof settings?.create_banner === 'boolean') setCreateBanner(settings.create_banner);
     if (typeof settings?.music_provider === 'string' && settings.music_provider.trim()) setMusicProvider(settings.music_provider);
     if (typeof settings?.lyria_model === 'string' && settings.lyria_model.trim()) setLyriaModel(settings.lyria_model);
     if (typeof settings?.tts_provider === 'string' && settings.tts_provider.trim()) setTtsProvider(settings.tts_provider);
     if (typeof settings?.gemini_tts_model === 'string' && settings.gemini_tts_model.trim()) setGeminiTtsModel(settings.gemini_tts_model);
     if (typeof settings?.episodes_mode === 'string' && settings.episodes_mode.trim()) setEpisodesMode(settings.episodes_mode);
     if (typeof settings?.episode_mode === 'boolean') setEpisodeMode(settings.episode_mode);
+    if (typeof settings?.intro_only === 'boolean') setIntroOnly(settings.intro_only);
     if (typeof settings?.start_frame_path === 'string') setStartFramePath(settings.start_frame_path);
     if (typeof settings?.end_frame_path === 'string') setEndFramePath(settings.end_frame_path);
+    if (typeof settings?.pipeline_started_at === 'string' && settings.pipeline_started_at.trim() && sessionPath) {
+      setSessionPipelineStartTime(sessionPath, settings.pipeline_started_at);
+    }
+    if (typeof settings?.pipeline_finished_at === 'string' && settings.pipeline_finished_at.trim() && sessionPath) {
+      setSessionPipelineEndTime(sessionPath, settings.pipeline_finished_at);
+    }
 
     const resolution = Array.isArray(settings?.resolution) ? settings.resolution : [];
     if (resolution.length === 2) {
@@ -409,6 +455,8 @@ export default function Agents() {
     preset,
     niche,
     niche_context: selectedNicheDirectorContext || null,
+    planner_skill_ids: plannerSkillIds,
+    planner_skill_prompt: plannerSkillPrompt,
     format,
     planner_model: plannerModel,
     character_image_model: charsModel,
@@ -422,6 +470,7 @@ export default function Agents() {
     resolution: null,
     fps: null,
     enable_music: enableMusic,
+    create_banner: createBanner,
     music_provider: musicProvider,
     lyria_model: lyriaModel,
     tts_provider: ttsProvider,
@@ -443,6 +492,7 @@ export default function Agents() {
     cloud_w: cloudW,
     cloud_h: cloudH,
     episode_mode: episodeMode,
+    intro_only: introOnly,
     start_frame_path: startFramePath || null,
     end_frame_path: endFramePath || null,
   });
@@ -569,6 +619,12 @@ export default function Agents() {
       }
       const effectiveEpisodesMode = isExisting ? episodesMode : 'new';
       const effectiveEpisodeMode = isExisting ? episodeMode : true;
+      const effectivePresetPrompt = (effectiveEpisodeMode && !String(presetPrompt || '').trim())
+        ? String(narrativePrompt || '').trim()
+        : presetPrompt;
+      if (effectivePresetPrompt && effectivePresetPrompt !== presetPrompt) {
+        setPresetPrompt(effectivePresetPrompt);
+      }
       const payload = {
         session_mode: isExisting ? 'existing' : 'new',
         session_path: isExisting ? activeSessionPath : null,
@@ -576,15 +632,19 @@ export default function Agents() {
         reset: opts?.redo ? true : Boolean(stepReset[step]),
         redo: Boolean(opts?.redo),
         prompt: narrativePrompt,
-        preset_prompt: presetPrompt,
+        preset_prompt: effectivePresetPrompt,
         project_name: projectName,
         niche,
+        planner_skill_ids: plannerSkillIds,
+        planner_skill_prompt: plannerSkillPrompt,
         theme,
         episodes: effectiveEpisodesMode,
         episode: targetEpisode ? parseInt(targetEpisode, 10) : null,
         preset,
         format,
+        youtube_shorts_export: format === 'youtube_video_only' ? false : (format === 'youtube_widescreen' ? true : null),
         enable_music: enableMusic,
+        create_banner: createBanner,
         music_provider: musicProvider,
         lyria_model: lyriaModel,
         tts_provider: ttsProvider,
@@ -596,6 +656,7 @@ export default function Agents() {
         subtitle_style: buildpackSubtitleStyle,
         subtitle_scale: subtitleScale,
         episode_mode: effectiveEpisodeMode,
+        intro_only: introOnly,
         planner_model: plannerModel,
         chars_model: charsModel,
         scenes_model: scenesModel,
@@ -636,6 +697,12 @@ export default function Agents() {
       if (start.data?.done && start.data?.result) {
         const instant = start.data.result;
         const instantStatus = instant?.status || 'success';
+        if (startedSessionPath && instant?.pipeline_started_at) {
+          setSessionPipelineStartTime(startedSessionPath, instant.pipeline_started_at);
+        }
+        if (startedSessionPath && instant?.pipeline_finished_at) {
+          setSessionPipelineEndTime(startedSessionPath, instant.pipeline_finished_at);
+        }
         setLogs((prev) => [...prev, { type: instantStatus === 'error' ? 'error' : 'info', msg: instant?.reason || `Step '${step}' ${instantStatus}.` }]);
         if (instantStatus === 'error') {
           pushToast('error', `Step ${step} failed.`);
@@ -652,6 +719,7 @@ export default function Agents() {
       }
 
       setJobId(currentJobId);
+      localStorage.setItem(JOB_ID_STORAGE_KEY, currentJobId);
       setLogs((prev) => [...prev, { type: 'info', msg: `Step '${step}' started.` }]);
 
       let finalRes = null;
@@ -668,6 +736,12 @@ export default function Agents() {
       setJobId(null);
 
       const nextPath = finalRes?.session_path || startedSessionPath || sessionPath;
+      if (nextPath && finalRes?.pipeline_started_at) {
+        setSessionPipelineStartTime(nextPath, finalRes.pipeline_started_at);
+      }
+      if (nextPath && finalRes?.pipeline_finished_at) {
+        setSessionPipelineEndTime(nextPath, finalRes.pipeline_finished_at);
+      }
       if (nextPath && nextPath !== sessionPath) {
         setSessionPath(nextPath);
       }
@@ -701,6 +775,7 @@ export default function Agents() {
       pushToast('error', `Step ${step} failed.`);
     } finally {
       setJobId(null);
+      localStorage.removeItem(JOB_ID_STORAGE_KEY);
       setStepBusy('');
     }
   };
@@ -831,6 +906,55 @@ export default function Agents() {
   };
 
   useEffect(() => {
+    const restoreSavedJob = async () => {
+      const savedJobId = window.localStorage.getItem(JOB_ID_STORAGE_KEY);
+      if (!savedJobId || jobId) return;
+      try {
+        const statusRes = await axios.get(`${API_BASE}/agents/autoanimator/job/${savedJobId}`);
+        if (statusRes.data?.done) {
+          window.localStorage.removeItem(JOB_ID_STORAGE_KEY);
+          return;
+        }
+      } catch {
+        window.localStorage.removeItem(JOB_ID_STORAGE_KEY);
+        return;
+      }
+      setJobId(savedJobId);
+      setRunning(true);
+      setLogs((prev) => [...prev, { type: 'info', msg: `Restoring live log stream for job ${savedJobId} after reload.` }]);
+    };
+    restoreSavedJob();
+  }, []);
+
+  useEffect(() => {
+    if (page !== 'workspace' || sessionMode !== 'existing' || !sessionPath || jobId) return;
+    let cancelled = false;
+
+    const attachSessionJob = async () => {
+      try {
+        const res = await axios.get(`${API_BASE}/agents/autoanimator/session-active-job`, {
+          params: { session_path: sessionPath },
+        });
+        if (cancelled) return;
+        if (res.data?.found && res.data?.job_id) {
+          const activeJobId = String(res.data.job_id);
+          setJobId(activeJobId);
+          setRunning(true);
+          window.localStorage.setItem(JOB_ID_STORAGE_KEY, activeJobId);
+          setLogs((prev) => [...prev, { type: 'info', msg: `Reattached to active session job ${activeJobId}.` }]);
+        }
+      } catch {
+        // No active job for this session.
+      }
+    };
+
+    attachSessionJob();
+    return () => {
+      cancelled = true;
+    };
+  }, [page, sessionMode, sessionPath, jobId]);
+
+  useEffect(() => {
     if (!jobId) return;
 
     wsIntentionalCloseRef.current = false;
@@ -959,6 +1083,7 @@ export default function Agents() {
         setTheme('auto-select');
         setPreset('auto-select');
         setNiche('auto-select');
+        setIntroOnly(true);
         setSectionLocks({ ...DEFAULT_SECTION_LOCKS });
       } catch {
         // Keep built-in defaults if template session is unavailable.
@@ -966,6 +1091,7 @@ export default function Agents() {
         setTheme('auto-select');
         setPreset('auto-select');
         setNiche('auto-select');
+        setIntroOnly(true);
       }
     };
     loadTemplateDefaultsForNewSession();
@@ -1014,25 +1140,20 @@ export default function Agents() {
             setPresetPrompt(presetFromState);
             setNarrativePrompt(hasSavedPrompt ? savedPrompt : '');
           } else if (hasSavedPrompt) {
-            // Legacy-session upgrade: ask backend to compute an LLM-derived persistent preset prompt.
+            // Legacy-session upgrade: first narrative prompt becomes preset prompt as-is.
+            setPresetPrompt(savedPrompt);
+            setNarrativePrompt(savedPrompt);
             try {
-              const materialize = await axios.post(`${API_BASE}/agents/autoanimator/materialize-preset-prompt`, {
+              await axios.post(`${API_BASE}/agents/autoanimator/session-sync`, {
                 session_path: sessionPath,
-                base_prompt: savedPrompt,
-                project_name: typeof settings?.project_name === 'string' ? settings.project_name : '',
-                niche: typeof settings?.niche === 'string' ? settings.niche : '',
+                settings: {
+                  prompt: savedPrompt,
+                  preset_prompt: savedPrompt,
+                },
+                locks: {},
               });
-              const computedPreset = typeof materialize?.data?.preset_prompt === 'string' ? materialize.data.preset_prompt : '';
-              if (computedPreset.trim()) {
-                setPresetPrompt(computedPreset);
-                setNarrativePrompt(savedPrompt);
-              } else {
-                setPresetPrompt('');
-                setNarrativePrompt(savedPrompt);
-              }
             } catch {
-              setPresetPrompt('');
-              setNarrativePrompt(savedPrompt);
+              // Non-blocking; local state is still updated.
             }
           } else {
             setPresetPrompt('');
@@ -1056,6 +1177,10 @@ export default function Agents() {
         if (typeof settings?.preset === 'string' && settings.preset.trim()) setPreset(settings.preset);
         if (typeof settings?.theme === 'string' && settings.theme.trim()) setTheme(settings.theme);
         if (typeof settings?.niche === 'string' && settings.niche.trim()) setNiche(settings.niche);
+        if (Array.isArray(settings?.planner_skill_ids)) setPlannerSkillIds(settings.planner_skill_ids.filter((v) => typeof v === 'string' && v.trim()));
+        else setPlannerSkillIds([]);
+        if (typeof settings?.planner_skill_prompt === 'string') setPlannerSkillPrompt(settings.planner_skill_prompt);
+        else setPlannerSkillPrompt('');
         if (typeof settings?.planner_model === 'string' && settings.planner_model.trim()) setPlannerModel(settings.planner_model);
         if (typeof settings?.character_image_model === 'string' && settings.character_image_model.trim()) setCharsModel(settings.character_image_model);
         if (typeof settings?.scene_image_model === 'string' && settings.scene_image_model.trim()) setScenesModel(settings.scene_image_model);
@@ -1064,6 +1189,7 @@ export default function Agents() {
         if (typeof settings?.max_panels_per_episode === 'number') setMaxPanelsPerEpisode(settings.max_panels_per_episode);
         if (typeof settings?.max_episode_duration_mins === 'number') setMaxEpisodeDurationMins(settings.max_episode_duration_mins);
         if (typeof settings?.enable_music === 'boolean') setEnableMusic(settings.enable_music);
+        if (typeof settings?.create_banner === 'boolean') setCreateBanner(settings.create_banner);
         if (typeof settings?.music_provider === 'string' && settings.music_provider.trim()) setMusicProvider(settings.music_provider);
         if (typeof settings?.lyria_model === 'string' && settings.lyria_model.trim()) setLyriaModel(settings.lyria_model);
         if (typeof settings?.tts_provider === 'string' && settings.tts_provider.trim()) setTtsProvider(settings.tts_provider);
@@ -1080,9 +1206,16 @@ export default function Agents() {
         if (typeof settings?.cloud_h === 'number') setCloudH(settings.cloud_h);
         if (typeof settings?.episodes_mode === 'string' && settings.episodes_mode.trim()) setEpisodesMode(settings.episodes_mode);
         if (typeof settings?.episode_mode === 'boolean') setEpisodeMode(settings.episode_mode);
+        if (typeof settings?.intro_only === 'boolean') setIntroOnly(settings.intro_only);
         if (typeof settings?.episode === 'number') setTargetEpisode(String(settings.episode));
         if (typeof settings?.start_frame_path === 'string') setStartFramePath(settings.start_frame_path);
         if (typeof settings?.end_frame_path === 'string') setEndFramePath(settings.end_frame_path);
+        if (typeof settings?.pipeline_started_at === 'string' && settings.pipeline_started_at.trim()) {
+          setSessionPipelineStartTime(sessionPath, settings.pipeline_started_at);
+        }
+        if (typeof settings?.pipeline_finished_at === 'string' && settings.pipeline_finished_at.trim()) {
+          setSessionPipelineEndTime(sessionPath, settings.pipeline_finished_at);
+        }
       } catch {
         // Keep current prompt when there is no stored session prompt.
       }
@@ -1094,14 +1227,18 @@ export default function Agents() {
     const loadPlannerCharPrompts = async () => {
       if (page !== 'workspace' || !sessionPath) {
         setCharPromptItems([]);
+        setObjectPromptItems([]);
         return;
       }
       try {
         const res = await axios.get(`${API_BASE}/agents/autoanimator/char-prompts`, { params: { session_path: sessionPath } });
         const rows = Array.isArray(res.data?.char_prompts) ? res.data.char_prompts : [];
         setCharPromptItems(rows.map((r) => ({ name: r.name, visual_prompt: r.visual_prompt || '' })));
+        const objRows = Array.isArray(res.data?.object_prompts) ? res.data.object_prompts : [];
+        setObjectPromptItems(objRows.map((r) => ({ name: r.name, visual_prompt: r.visual_prompt || '', object_type: r.object_type || 'prop' })));
       } catch {
         setCharPromptItems([]);
+        setObjectPromptItems([]);
       }
     };
 
@@ -1112,6 +1249,7 @@ export default function Agents() {
     if (sessionMode !== 'existing') {
       setEpisodesMode('new');
       setEpisodeMode(true);
+      setIntroOnly(true);
       setTargetEpisode('');
       return;
     }
@@ -1271,16 +1409,21 @@ export default function Agents() {
         const themes = res.data?.themes || {};
         const styles = res.data?.art_styles || {};
         const niches = res.data?.niches || {};
+        const skills = res.data?.planner_skills || {};
         const defaults = res.data?.defaults || {};
         setPlannerThemes(themes);
         setPlannerArtStyles(styles);
         setPlannerNiches(niches);
+        setPlannerSkillsCatalog(skills);
         if (sessionMode === 'new') {
           if (typeof defaults?.max_image_requests === 'number') setMaxImageRequests(defaults.max_image_requests);
           if (typeof defaults?.max_chars_per_episode === 'number') setMaxCharsPerEpisode(defaults.max_chars_per_episode);
           if (typeof defaults?.max_panels_per_episode === 'number') setMaxPanelsPerEpisode(defaults.max_panels_per_episode);
           if (typeof defaults?.max_episode_duration_mins === 'number') setMaxEpisodeDurationMins(defaults.max_episode_duration_mins);
           if (typeof defaults?.niche === 'string' && defaults.niche.trim()) setNiche(defaults.niche);
+          if (Array.isArray(defaults?.planner_skill_ids)) {
+            setPlannerSkillIds(defaults.planner_skill_ids.filter((v) => typeof v === 'string' && v.trim()));
+          }
         }
         if (typeof defaults?.tts_provider === 'string' && defaults.tts_provider.trim()) setTtsProvider(defaults.tts_provider);
         if (typeof defaults?.gemini_tts_model === 'string' && defaults.gemini_tts_model.trim()) setGeminiTtsModel(defaults.gemini_tts_model);
@@ -1288,6 +1431,7 @@ export default function Agents() {
         setPlannerThemes({});
         setPlannerArtStyles({});
         setPlannerNiches({});
+        setPlannerSkillsCatalog({});
       }
     };
 
@@ -1507,6 +1651,19 @@ export default function Agents() {
           </div>
         </div>
       </div>
+    );
+  }
+
+  if (selectedAgent === 'ova') {
+    return (
+      <OvaWorkspace
+        onBack={() => {
+          setPage('selector');
+          setSessionMode('new');
+          setSessionPath('');
+          navigate('/agents');
+        }}
+      />
     );
   }
 
@@ -1838,6 +1995,21 @@ export default function Agents() {
                 </span>
               </label>
             </div>
+            <div className="config-control" style={{ marginTop: '0.55rem' }}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={introOnly}
+                  onChange={(e) => setIntroOnly(e.target.checked)}
+                />
+                <span style={{ marginLeft: 6 }}>
+                  Intro Only Mode (new sessions default ON)
+                </span>
+              </label>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                When enabled, planner emphasizes intro/setup-focused episode structure.
+              </div>
+            </div>
             <div className="config-grid" style={{ marginTop: '0.65rem' }}>
               <div className="config-control">
                 <label>Theme</label>
@@ -1881,6 +2053,57 @@ export default function Agents() {
                 readOnly
                 style={{ width: '100%', resize: 'vertical', maxWidth: '100%', opacity: 0.9 }}
               />
+            </div>
+            <div className="config-control" style={{ marginTop: '0.65rem' }}>
+              <label>Optional Planner Skills</label>
+              {Object.entries(plannerSkillsCatalog).length === 0 ? (
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                  No predefined planner skills found in config.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                  {Object.entries(plannerSkillsCatalog).map(([skillId, skillCfg]) => {
+                    const checked = plannerSkillIds.includes(skillId);
+                    const label = String(skillCfg?.label || skillId);
+                    const description = String(skillCfg?.description || '');
+                    return (
+                      <label key={skillId} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            setPlannerSkillIds((prev) => {
+                              const next = new Set(prev);
+                              if (e.target.checked) next.add(skillId);
+                              else next.delete(skillId);
+                              return Array.from(next);
+                            });
+                          }}
+                        />
+                        <span>
+                          <strong>{label}</strong>
+                          {description ? <span style={{ color: 'var(--text-muted)' }}> - {description}</span> : null}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="config-control" style={{ marginTop: '0.55rem' }}>
+              <label>Custom Planner Skill Prompt (optional)</label>
+              <textarea
+                className="planner-prompt-textarea"
+                rows={4}
+                wrap="soft"
+                value={plannerSkillPrompt}
+                onChange={(e) => setPlannerSkillPrompt(e.target.value)}
+                placeholder="Example: Enforce scientifically plausible object behavior and engineering constraints for every invention panel."
+                style={{ width: '100%', resize: 'vertical', maxWidth: '100%' }}
+              />
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                These optional skills are injected into planner/director prompts and carried into scene generation guidance.
+              </div>
             </div>
             <div className="config-grid" style={{ marginTop: '0.65rem' }}>
               <div className="config-control">
@@ -1981,6 +2204,30 @@ export default function Agents() {
                 </div>
               )}
             </div>
+            {objectPromptItems.length > 0 && (
+              <div className="config-control" style={{ marginBottom: '0.6rem' }}>
+                <label>Planner Object Prompts ({objectPromptItems.length})</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                  {objectPromptItems.map((item, idx) => (
+                    <div key={`${item.name}-obj-${idx}`}>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginBottom: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <span>🔧 {item.name}</span>
+                        <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>[{item.object_type}]</span>
+                      </div>
+                      <textarea
+                        rows={5}
+                        value={item.visual_prompt}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setObjectPromptItems((prev) => prev.map((p, pidx) => (pidx === idx ? { ...p, visual_prompt: value } : p)));
+                        }}
+                        style={{ width: '100%', resize: 'vertical', minHeight: 130 }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {sessionMode === 'existing' ? (
               <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                 Character source is controlled by files from selected session.
@@ -2042,6 +2289,15 @@ export default function Agents() {
               <button className="btn" type="button" title="Redo Chars" onClick={() => runNarrativeStep('chars', { redo: true })} disabled={stepBusy === 'chars' || stepBusy === 'all'}><RotateCcw size={14} /></button>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.chars || 'n/a'}</span>
               {renderHashHistoryControls('chars')}
+            </div>
+            <div className="config-control" style={{ marginTop: '0.65rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="checkbox" checked={createBanner} onChange={(e) => setCreateBanner(e.target.checked)} />
+                <span>Create Show Banner</span>
+              </label>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                Generates a wide panoramic title-card after character generation and uses it as the series first-frame anchor.
+              </div>
             </div>
             </fieldset>
           </details>
@@ -2236,6 +2492,7 @@ export default function Agents() {
                 <option value="tiktok">TikTok</option>
                 <option value="instagram_reels">Instagram Reels</option>
                 <option value="youtube_shorts">YouTube Shorts</option>
+                <option value="youtube_video_only">YouTube Video Only (16:9)</option>
                 <option value="youtube_widescreen">YouTube Video (16:9 + Shorts export)</option>
               </select>
             </div>
@@ -2632,6 +2889,11 @@ export default function Agents() {
               {sessionPath && pipelineStartBySession[sessionPath] && (
                 <span style={{ marginLeft: '8px', color: 'var(--text-accent)' }}>
                   Pipeline Start: {new Date(pipelineStartBySession[sessionPath]).toLocaleString()}
+                </span>
+              )}
+              {sessionPath && pipelineEndBySession[sessionPath] && (
+                <span style={{ marginLeft: '8px', color: 'var(--text-accent)' }}>
+                  Pipeline End: {new Date(pipelineEndBySession[sessionPath]).toLocaleString()}
                 </span>
               )}
             </div>

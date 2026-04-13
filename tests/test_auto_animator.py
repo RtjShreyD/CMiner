@@ -102,7 +102,7 @@ class EpisodePlannerTests(unittest.TestCase):
 
             ep_dir = tmp_path / "episodes" / "episode1"
             self.assertTrue(ep_dir.exists())
-            self.assertTrue((ep_dir / "manga-board.json").exists())
+            self.assertTrue((ep_dir / "storyboard.json").exists())
 
     def test_episode_planner_expands_panels_to_target_budget(self):
         with tempfile.TemporaryDirectory() as td:

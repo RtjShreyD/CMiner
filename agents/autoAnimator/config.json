@@ -10,7 +10,9 @@
     "max_panels_per_episode": 50,
     "max_episode_duration_mins": 1,
     "tts_max_parallel_panels": 4,
-    "segment_workers": 2,
+    "segment_workers": 4,
+    "scene_concurrency": 4,
+    "cloud_workers": 4,
     "music_provider": "lyria",
     "lyria_model": "lyria-3-clip-preview",
     "tts_provider": "edge",
@@ -71,11 +73,28 @@
     },
     "stage_show": {
       "label": "Stage show",
-      "director_context": "Frame the episode as a live stage performance with a persistent stage map (judges desk, demo platform, audience axis, LED backdrop). Keep every character's visual identity, spatial position, and role continuity strongly consistent while evolving pose, expression, and camera dynamics shot-by-shot. Use anime-style shot progression (establishing wide, presenter medium, judge close reaction, device hero shot, crowd beat), keep dialogue and scene beats tightly synchronized, enforce strict panel-to-panel continuity, and close with a clear applause/payoff moment. Prefer a stylized adult cartoon anime look with sci-fi satire energy (rick_morty_stage_show art style) for this niche unless user explicitly overrides style."
+      "director_context": "Frame the episode as a live stage performance with a persistent stage map (judges desk, demo platform, audience axis, LED backdrop). Keep every character's visual identity, spatial position, and role continuity strongly consistent while evolving pose, expression, and camera dynamics shot-by-shot. Use anime-style shot progression (establishing wide, presenter medium, judge close reaction, device hero shot, crowd beat), keep dialogue and scene beats tightly synchronized, enforce strict panel-to-panel continuity, and close with a clear applause/payoff moment. Prefer a stylized adult cartoon anime look with sci-fi satire energy (rick_morty_stage_show art style) for this niche unless user explicitly overrides style. SPEECH BUBBLE MANDATE: every panel with spoken lines must include a speech_bubbles array rendered directly in the scene image. Use each character's assigned bubble_style (from characters array or show bible). Bubbles must contain exact verbatim dialogue text, be clearly legible with manga-style rendering, and must not obscure character faces or the dominant visual focus. SHOW BIBLE PRIORITY: if the series preset_prompt is a full show format document, extract and enforce all defined rules (character roster, bubble styles, stage geometry, comedic rhythm pattern, episode anatomy) as hard constraints."
     },
     "series_drama": {
       "label": "Series drama",
       "director_context": "Build this as an ongoing high-stakes drama series with strong episode-to-episode continuity, emotionally charged character arcs, and cinematic escalation. Blend intense dialogue beats, occasional high-impact fight sequences, and dynamic visual set-pieces inspired by long-running action dramas like Dragon Ball Super and Swat Kats. Keep pacing serialized: setup, emotional conflict, strategic reveal, and a compelling continuation hook."
+    }
+  },
+  "planner_skills": {
+    "science_object_rigor": {
+      "label": "Science Object Rigor",
+      "description": "Use plausible engineering/science constraints while designing devices and inventions.",
+      "prompt": "For every major object/invention, enforce physically plausible behavior, explicit materials/components, realistic operating constraints, and cause-effect consistency in panels and dialogue. Avoid magical unexplained behavior unless explicitly requested."
+    },
+    "infographic_storyboard": {
+      "label": "Infographic Storyboard Mode",
+      "description": "Favor explanatory visual pedagogy panels for technical ideas.",
+      "prompt": "When concepts are explanatory, insert infographic-like manga panels with labels, arrows, comparison frames, and process steps while maintaining narrative continuity and cinematic rhythm."
+    },
+    "safety_and_ethics": {
+      "label": "Safety and Ethics Lens",
+      "description": "Add risk-awareness and ethical guardrails in high-impact concepts.",
+      "prompt": "For potentially dangerous technology/science scenarios, include explicit safety constraints, failure modes, and ethical considerations in story decisions, object behavior, and dialogue framing."
     }
   },
   "tts_voices_pool": {

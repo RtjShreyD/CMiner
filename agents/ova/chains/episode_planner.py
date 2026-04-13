@@ -57,7 +57,7 @@ class EpisodePlanner:
         prior_characters = []
         if next_num > 1:
             prior_ep_dir = episodes_dir / f"episode{next_num - 1}"
-            for fname in ("storyboard.json", "manga-board.json"):
+            for fname in ("storyboard.json",):
                 prior_path = prior_ep_dir / fname
                 if prior_path.exists():
                     try:

@@ -2,9 +2,9 @@
 MusicGen – Creates provider-oriented background music plan from storyboard context.
 
 Produces:
-- music/music_prompt.txt
-- music/music_plan.json
-- music/generated_music.mp3 (when provider is available)
+- episodes/episodeN/music/music_prompt.txt
+- episodes/episodeN/music/music_plan.json
+- episodes/episodeN/music/generated_music.mp3 (when provider is available)
 """
 
 import json
@@ -110,7 +110,8 @@ class MusicGen:
 
     def run(self, manga_board: Dict[str, Any], session_dir: Path, base_prompt: str) -> Path | None:
         print("--- Pipeline: Music Generation ---")
-        music_dir = session_dir / "music"
+        current_episode = max(1, int(manga_board.get("episode_number", 1) or 1))
+        music_dir = session_dir / "episodes" / f"episode{current_episode}" / "music"
         music_dir.mkdir(parents=True, exist_ok=True)
 
         plan = self._generate_music_prompt(base_prompt=base_prompt, manga_board=manga_board)

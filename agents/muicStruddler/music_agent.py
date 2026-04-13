@@ -57,7 +57,21 @@ class StrudelMusicAgent:
     ):
         """Generate a music track using Strudel and produce an audio file placeholder."""
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        print(f"[Strudel] requested style={style} duration={duration_seconds}s")
+        requested_style = str(style or "ambient").strip().lower()
+        style_aliases = {
+            "cinematic": "ambient",
+            "lo-fi": "lofi",
+            "electronic": "techno",
+        }
+        allowed_styles = {
+            "techno", "ambient", "dnb", "house", "acid", "lofi", "minimal",
+            "breakbeat", "dub", "trance", "jungle", "chillout", "industrial",
+        }
+        effective_style = style_aliases.get(requested_style, requested_style)
+        if effective_style not in allowed_styles:
+            effective_style = "ambient"
+
+        print(f"[Strudel] requested style={requested_style} -> using {effective_style}, duration={duration_seconds}s")
         print(f"[Strudel] prompt: {prompt}")
 
         if not self.enabled:
@@ -67,7 +81,7 @@ class StrudelMusicAgent:
 
         # Play a style (live coding server) to follow package intent.
         try:
-            play_resp = strudel(action="play", style=style)
+            play_resp = strudel(action="play", style=effective_style)
             print(f"[Strudel] play response: {play_resp}")
         except Exception as e:
             print(f"Strudel play failed: {e}")
@@ -207,8 +221,7 @@ class LyriaMusicAgent:
                 model=selected_model,
                 contents=attempt_prompt,
                 config=genai_types.GenerateContentConfig(
-                    response_modalities=["AUDIO", "TEXT"],
-                    response_mime_type="audio/mp3",
+                    response_modalities=["AUDIO"],
                 ),
             )
 

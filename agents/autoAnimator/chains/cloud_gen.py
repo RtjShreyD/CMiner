@@ -10,6 +10,7 @@ Produces: overlays/panel_XX/frame_XXXX.png (transparent PNGs)
 
 import json
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 
@@ -27,6 +28,8 @@ class CloudGen:
         project_name: str = "AutoAnimator",
         episode_number: int = 1,
         overlay_dir_name: str = "overlays",
+        scenes_dir_name: str | None = None,
+        audio_dir_name: str | None = None,
         cloud_style: str = "cloud-none",
         font_style: str = "font-geist-sans",
         subtitle_style: str = "sub-clean-bottom",
@@ -40,12 +43,16 @@ class CloudGen:
         cloud_h: float | None = None,
         log_prefix: str = "",
         use_panel_fps: bool = True,
+        cloud_workers: int = 4,
     ):
         self.fps = fps
         self.resolution = resolution
         self.project_name = project_name or "AutoAnimator"
         self.episode_number = max(1, int(episode_number or 1))
         self.overlay_dir_name = (overlay_dir_name or "overlays").strip() or "overlays"
+        default_episode_prefix = f"episodes/episode{self.episode_number}"
+        self.scenes_dir_name = (scenes_dir_name or f"{default_episode_prefix}/scenes").strip()
+        self.audio_dir_name = (audio_dir_name or f"{default_episode_prefix}/audio").strip()
         self.cloud_style = cloud_style
         self.font_style = font_style
         self.subtitle_style = subtitle_style
@@ -59,6 +66,7 @@ class CloudGen:
         self.cloud_h = cloud_h
         self.log_prefix = (log_prefix or "").strip()
         self.use_panel_fps = bool(use_panel_fps)
+        self.cloud_workers = max(1, int(cloud_workers or 4))
 
     def _log(self, message: str):
         prefix = f"{self.log_prefix} " if self.log_prefix else ""
@@ -86,105 +94,149 @@ class CloudGen:
         self._log("--- Pipeline: Cloud Generation (OpenCV) ---")
         overlays_dir = session_dir / self.overlay_dir_name
         overlays_dir.mkdir(parents=True, exist_ok=True)
-        scenes_dir = session_dir / "scenes"
-        audio_dir = session_dir / "audio"
+        scenes_dir = session_dir / self.scenes_dir_name
+        audio_dir = session_dir / self.audio_dir_name
+
+        # Compatibility fallback for older sessions.
+        if not scenes_dir.exists():
+            legacy_scenes_dir = session_dir / "scenes"
+            if legacy_scenes_dir.exists():
+                scenes_dir = legacy_scenes_dir
+        if not audio_dir.exists():
+            legacy_audio_dir = session_dir / "audio"
+            if legacy_audio_dir.exists():
+                audio_dir = legacy_audio_dir
 
         panels = manga_board.get("panels", [])
-        characters = manga_board.get("characters", [])
 
-        font_size = max(20, int(34 * max(0.5, self.subtitle_scale)))
+        base_dim = max(540, min(self.resolution[0], self.resolution[1]))
+        font_size = max(20, int(base_dim * 0.032 * max(0.5, self.subtitle_scale)))
         font = _load_font(self.font_style, font_size)
         sub_style = _resolve_subtitle_style(self.subtitle_style)
         cloud_kind = _resolve_cloud_kind(self.cloud_style)
 
-        for i, panel in enumerate(panels):
-            panel_key = f"panel_{i:02d}"
-            timing_path = audio_dir / f"{panel_key}_timing.json"
-            scene_path = scenes_dir / f"{panel_key}.png"
-
-            if not timing_path.exists():
-                self._log(f"No timing for {panel_key}, skipping clouds.")
-                continue
-
-            with open(timing_path, "r") as f:
-                timings = json.load(f)
-
-            if not timings:
-                continue
-
-            # Load scene image for OpenCV analysis
-            if scene_path.exists():
-                scene_img = cv2.imread(str(scene_path))
-            else:
-                # Create a blank scene if missing
-                scene_img = np.zeros((self.resolution[1], self.resolution[0], 3), dtype=np.uint8)
-
-            # Resize scene to match overlay resolution if needed
-            h, w = scene_img.shape[:2]
-            if (w, h) != self.resolution:
-                scene_img = cv2.resize(scene_img, self.resolution)
-
-            # Find optimal placement regions for each character
-            dialogue_lines = panel.get("dialogue", [])
-            char_positions = self._assign_character_positions(
-                dialogue_lines, scene_img
-            )
-
-            # Calculate total frames from timing
-            last_t = timings[-1]
-            total_sec_timing = (last_t["offset"] + last_t["duration"]) / 10_000_000.0
-            audio_path = audio_dir / f"{panel_key}.mp3"
-            if not audio_path.exists():
-                wav_path = audio_dir / f"{panel_key}.wav"
-                audio_path = wav_path if wav_path.exists() else audio_path
-            total_sec_audio = self._audio_duration_seconds(audio_path) if audio_path.exists() else 0.0
-            total_sec = max(total_sec_timing, total_sec_audio)
-            panel_fps = max(8, int(panel.get("fps", self.fps) or self.fps)) if self.use_panel_fps else max(8, int(self.fps))
-            total_frames = max(1, int(np.ceil(total_sec * panel_fps)) + 2)
-
-            panel_overlay_dir = overlays_dir / panel_key
-            panel_overlay_dir.mkdir(parents=True, exist_ok=True)
-
-            self._log(f"Generating {total_frames} cloud frames for {panel_key} at {panel_fps} fps")
-
-            # Sync offset (200_000 units = 20ms advance)
-            SYNC_OFFSET = 200_000
-            timing_idx = 0
-            char_words: Dict[str, List[str]] = {}
-            active_char = None
-
-            for frame_idx in range(total_frames):
-                current_time_sec = frame_idx / panel_fps
-                current_time_units = (current_time_sec * 10_000_000) + SYNC_OFFSET
-
-                # Incrementally consume timing entries up to current frame time.
-                while timing_idx < len(timings) and timings[timing_idx]["offset"] <= current_time_units:
-                    t = timings[timing_idx]
-                    cname = t.get("character", "Unknown")
-                    active_char = cname
-                    if cname not in char_words:
-                        char_words[cname] = []
-                    char_words[cname].append(t.get("text", ""))
-                    timing_idx += 1
-
-                # Create transparent overlay
-                img = Image.new("RGBA", self.resolution, (0, 0, 0, 0))
-                draw = ImageDraw.Draw(img)
-
-                if i == 0 and frame_idx == 0:
-                    title = f"{self.project_name} - Episode {self.episode_number}"
-                    self._draw_title_overlay(draw, title, font)
-
-                # Show currently speaking text with the same styles used by buildpack preview.
-                if active_char and active_char in char_words:
-                    words = char_words[active_char][-15:]  # last 15 chunks
-                    text = " ".join(words)
-                    self._draw_overlay_text(draw, text, char_positions.get(active_char, (100, 50)), font, sub_style, cloud_kind)
-
-                frame_path = panel_overlay_dir / f"frame_{frame_idx:04d}.png"
-                img.save(frame_path)
+        worker_count = min(self.cloud_workers, max(1, len(panels)))
+        if worker_count > 1:
+            with ThreadPoolExecutor(max_workers=worker_count) as pool:
+                futures = [
+                    pool.submit(
+                        self._process_panel_overlays,
+                        i, panel, overlays_dir, scenes_dir, audio_dir, font, sub_style, cloud_kind,
+                    )
+                    for i, panel in enumerate(panels)
+                ]
+                for f in as_completed(futures):
+                    f.result()
+        else:
+            for i, panel in enumerate(panels):
+                self._process_panel_overlays(i, panel, overlays_dir, scenes_dir, audio_dir, font, sub_style, cloud_kind)
 
         self._log("Cloud generation complete.")
+
+    def _process_panel_overlays(
+        self,
+        i: int,
+        panel: Dict[str, Any],
+        overlays_dir: Path,
+        scenes_dir: Path,
+        audio_dir: Path,
+        font: Any,
+        sub_style: Dict[str, Any],
+        cloud_kind: str,
+    ) -> None:
+        panel_key = f"panel_{i:02d}"
+        timing_path = audio_dir / f"{panel_key}_timing.json"
+        scene_path = scenes_dir / f"{panel_key}.png"
+
+        if not timing_path.exists():
+            self._log(f"No timing for {panel_key}, skipping clouds.")
+            return
+
+        with open(timing_path, "r") as f:
+            timings = json.load(f)
+
+        if not timings:
+            return
+
+        # Load scene image for OpenCV analysis
+        if scene_path.exists():
+            scene_img = cv2.imread(str(scene_path))
+        else:
+            # Create a blank scene if missing
+            scene_img = np.zeros((self.resolution[1], self.resolution[0], 3), dtype=np.uint8)
+
+        # Resize scene to match overlay resolution if needed
+        h, w = scene_img.shape[:2]
+        if (w, h) != self.resolution:
+            scene_img = cv2.resize(scene_img, self.resolution)
+
+        # Find optimal placement regions for each character
+        dialogue_lines = panel.get("dialogue", [])
+        char_positions = self._assign_character_positions(
+            dialogue_lines, scene_img
+        )
+
+        # Calculate total frames from timing
+        last_t = timings[-1]
+        total_sec_timing = (last_t["offset"] + last_t["duration"]) / 10_000_000.0
+        audio_path = audio_dir / f"{panel_key}.mp3"
+        if not audio_path.exists():
+            wav_path = audio_dir / f"{panel_key}.wav"
+            audio_path = wav_path if wav_path.exists() else audio_path
+        total_sec_audio = self._audio_duration_seconds(audio_path) if audio_path.exists() else 0.0
+        total_sec = max(total_sec_timing, total_sec_audio)
+        panel_fps = max(8, int(panel.get("fps", self.fps) or self.fps)) if self.use_panel_fps else max(8, int(self.fps))
+        total_frames = max(1, int(np.ceil(total_sec * panel_fps)) + 2)
+
+        panel_overlay_dir = overlays_dir / panel_key
+        panel_overlay_dir.mkdir(parents=True, exist_ok=True)
+
+        self._log(f"Generating {total_frames} cloud frames for {panel_key} at {panel_fps} fps")
+
+        # Sync offset (200_000 units = 20ms advance)
+        SYNC_OFFSET = 200_000
+        timing_idx = 0
+        char_words: Dict[str, List[str]] = {}
+        active_char = None
+
+        for frame_idx in range(total_frames):
+            current_time_sec = frame_idx / panel_fps
+            current_time_units = (current_time_sec * 10_000_000) + SYNC_OFFSET
+
+            # Incrementally consume timing entries up to current frame time.
+            while timing_idx < len(timings) and timings[timing_idx]["offset"] <= current_time_units:
+                t = timings[timing_idx]
+                cname = t.get("character", "Unknown")
+                active_char = cname
+                if cname not in char_words:
+                    char_words[cname] = []
+                char_words[cname].append(t.get("text", ""))
+                timing_idx += 1
+
+            # Create transparent overlay
+            img = Image.new("RGBA", self.resolution, (0, 0, 0, 0))
+            draw = ImageDraw.Draw(img)
+
+            if i == 0 and frame_idx == 0:
+                title = f"{self.project_name} - Episode {self.episode_number}"
+                self._draw_title_overlay(draw, title, font)
+
+            # Show currently speaking text with the same styles used by buildpack preview.
+            if active_char and active_char in char_words:
+                words = char_words[active_char][-15:]  # last 15 chunks
+                text = " ".join(words)
+                self._draw_overlay_text(
+                    draw,
+                    text,
+                    char_positions.get(active_char, (100, 50)),
+                    font,
+                    sub_style,
+                    cloud_kind,
+                    speaker_name=active_char,
+                )
+
+            frame_path = panel_overlay_dir / f"frame_{frame_idx:04d}.png"
+            img.save(frame_path)
 
     def _assign_character_positions(
         self,
@@ -255,11 +307,15 @@ class CloudGen:
         font: ImageFont.FreeTypeFont,
         subtitle_style: Dict[str, Any],
         cloud_kind: str,
+        speaker_name: str | None = None,
     ):
         """Draw cloud and subtitle text using shared buildpack styles."""
+        speaker = str(speaker_name or "Narrator").strip() or "Narrator"
+        speaker_line = f"{speaker}:"
         pad = 20
         max_text_w = 380
-        lines = self._wrap_text(text, font, draw, max_text_w)
+        spoken_lines = self._wrap_text(text, font, draw, max_text_w)
+        lines = [speaker_line] + spoken_lines
 
         if not lines:
             return
@@ -311,10 +367,10 @@ class CloudGen:
 
         # Subtitle region follows BuildPack layout points and clamps to resolution.
         width, height = self.resolution
-        side_margin = max(18, int(width * 0.04))
+        side_margin = max(24, int(width * 0.06))
         subtitle_x_norm = max(0.0, min(float(self.subtitle_x) if self.subtitle_x is not None else 0.06, 0.95))
         subtitle_x_px = int(width * subtitle_x_norm)
-        band_pad_x = max(14, int(width * 0.016))
+        band_pad_x = max(20, int(width * 0.03))
         band_pad_y = max(10, int(height * 0.008))
         subtitle_max_width = max(160, width - subtitle_x_px - side_margin - (2 * band_pad_x))
 
@@ -326,16 +382,19 @@ class CloudGen:
             subtitle_x_px = side_margin + band_pad_x
             subtitle_max_width = max(220, width - (2 * side_margin) - (2 * band_pad_x))
 
-        summary = " ".join(lines)
-        subtitle_lines = self._wrap_text(summary, font, draw, subtitle_max_width)
+        subtitle_body_lines = self._wrap_text(text, font, draw, subtitle_max_width)
+        subtitle_lines = [speaker_line] + subtitle_body_lines
         if not subtitle_lines:
             return
 
-        # Keep subtitle blocks compact; overflow wraps and truncates softly.
+        # Keep subtitle blocks compact while always preserving speaker identity.
         max_subtitle_lines = 3
-        if len(subtitle_lines) > max_subtitle_lines:
-            subtitle_lines = subtitle_lines[:max_subtitle_lines]
-            subtitle_lines[-1] = subtitle_lines[-1].rstrip() + "..."
+        max_body_lines = max(1, max_subtitle_lines - 1)
+        body_lines = subtitle_lines[1:]
+        if len(body_lines) > max_body_lines:
+            body_lines = body_lines[:max_body_lines]
+            body_lines[-1] = body_lines[-1].rstrip() + "..."
+        subtitle_lines = [subtitle_lines[0]] + body_lines
 
         subtitle_line_heights = [self._text_height(draw, font, line) for line in subtitle_lines]
         subtitle_text_h = sum(subtitle_line_heights) + max(0, (len(subtitle_lines) - 1) * 4)

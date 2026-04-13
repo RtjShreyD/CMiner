@@ -19,6 +19,10 @@ from agents.autoAnimator.utils import (
 )
 from agents.shared.llm_tracker import LLMTracker
 
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
+
 
 _STATE_WRITE_LOCK = threading.Lock()
 _GENERIC_PROJECT_NAMES = {
@@ -480,8 +484,16 @@ def main():
     parser.add_argument("--theme", help="Theme key from config themes")
     parser.add_argument("--preset", help="Style preset key from config art_styles")
     parser.add_argument("--format", choices=["tiktok","instagram_reels","youtube_shorts","youtube_widescreen"], help="Output format preset")
+    parser.add_argument(
+        "--youtube_shorts_export",
+        choices=["auto", "on", "off"],
+        default="auto",
+        help="Control whether Shorts variant is exported when format is youtube_widescreen",
+    )
     parser.add_argument("--vector_upscale", action="store_true", help="Apply upscale stub after image generation")
     parser.add_argument("--enable_music", action="store_true", help="Include background music in final video")
+    parser.add_argument("--create_banner", action="store_true", help="Generate wide panoramic show banner after character generation and use it as the series first-frame anchor")
+    parser.add_argument("--intro_only", action="store_true", help="Generate an intro-only episode flow from the base premise")
     parser.add_argument("--max_image_requests", type=int, help="Maximum total image requests")
     parser.add_argument("--max_chars_per_episode", type=int, help="Maximum characters in one episode")
     parser.add_argument("--max_panels_per_episode", type=int, help="Maximum panel count in one episode")
@@ -495,6 +507,8 @@ def main():
     parser.add_argument("--subtitle_scale", type=float, help="Subtitle scale from buildpack")
     parser.add_argument("--tts_max_parallel_panels", type=int, help="Maximum concurrent panel TTS jobs")
     parser.add_argument("--segment_workers", type=int, help="Maximum concurrent segment ffmpeg jobs")
+    parser.add_argument("--scene_concurrency", type=int, help="Maximum concurrent scene image API requests")
+    parser.add_argument("--cloud_workers", type=int, help="Maximum concurrent panels in cloud overlay generation")
     parser.add_argument(
         "--tts_provider",
         choices=["edge", "gemini"],
@@ -509,6 +523,8 @@ def main():
     parser.add_argument("--director_fallback_model", help="Override director fallback model name")
     parser.add_argument("--character_image_model", help="Override character image model name")
     parser.add_argument("--scene_image_model", help="Override scene image model name")
+    parser.add_argument("--planner_skill_ids", help="Comma-separated planner skill IDs from config planner_skills")
+    parser.add_argument("--planner_skill_prompt", help="Optional custom planner skill prompt text")
     parser.add_argument(
         "--music_provider",
         choices=["strudel", "lyria"],
@@ -565,7 +581,9 @@ def main():
     max_panels = models_config.get("max_panels_per_episode", 50)
     max_duration = models_config.get("max_episode_duration_mins", 1)
     tts_max_parallel_panels = models_config.get("tts_max_parallel_panels", 4)
-    segment_workers = models_config.get("segment_workers", 2)
+    segment_workers = models_config.get("segment_workers", 4)
+    scene_concurrency = models_config.get("scene_concurrency", 4)
+    cloud_workers = models_config.get("cloud_workers", 4)
     tts_provider = models_config.get("tts_provider", "edge")
     gemini_tts_model = models_config.get("gemini_tts_model", "models/gemini-2.5-flash-tts")
 
@@ -581,6 +599,10 @@ def main():
         tts_max_parallel_panels = max(1, args.tts_max_parallel_panels)
     if args.segment_workers:
         segment_workers = max(1, args.segment_workers)
+    if args.scene_concurrency:
+        scene_concurrency = max(1, args.scene_concurrency)
+    if args.cloud_workers:
+        cloud_workers = max(1, args.cloud_workers)
     if args.tts_provider:
         tts_provider = args.tts_provider
     if args.gemini_tts_model:
@@ -628,6 +650,7 @@ def main():
     themes = config.get("themes", {})
     art_styles = config.get("art_styles", {})
     niche_bundles = config.get("niche_bundles", {}) if isinstance(config.get("niche_bundles", {}), dict) else {}
+    planner_skills_catalog = config.get("planner_skills", {}) if isinstance(config.get("planner_skills", {}), dict) else {}
     output_presets = config.get("output_presets", {})
 
     niche_key = requested_niche if requested_niche in niche_bundles else None
@@ -767,6 +790,43 @@ def main():
     start_frame_path = start_frame_path or None
     end_frame_path = end_frame_path or None
 
+    create_banner = args.create_banner or bool(state.get("settings", {}).get("create_banner", False))
+    intro_only = args.intro_only or bool(state.get("settings", {}).get("intro_only", False))
+
+    # Optional planner-skill augmentation (predefined skill ids + custom user skill prompt).
+    raw_skill_ids = str(args.planner_skill_ids or "").strip()
+    if raw_skill_ids:
+        planner_skill_ids = [s.strip() for s in raw_skill_ids.split(",") if s.strip()]
+    else:
+        saved_skill_ids = state.get("settings", {}).get("planner_skill_ids", [])
+        planner_skill_ids = [str(s).strip() for s in saved_skill_ids if str(s).strip()] if isinstance(saved_skill_ids, list) else []
+    valid_skill_ids = [sid for sid in planner_skill_ids if sid in planner_skills_catalog]
+
+    planner_skill_prompt = str(args.planner_skill_prompt or "").strip()
+    if not planner_skill_prompt:
+        planner_skill_prompt = str(state.get("settings", {}).get("planner_skill_prompt", "") or "").strip()
+
+    resolved_skill_blocks = []
+    for sid in valid_skill_ids:
+        cfg = planner_skills_catalog.get(sid, {})
+        if not isinstance(cfg, dict):
+            continue
+        resolved_skill_blocks.append(
+            {
+                "id": sid,
+                "label": str(cfg.get("label", sid) or sid),
+                "description": str(cfg.get("description", "") or "").strip(),
+                "prompt": str(cfg.get("prompt", "") or "").strip(),
+            }
+        )
+
+    # Auto-apply existing show banner as start frame when no explicit start_frame set.
+    _banner_auto = session_dir / "banner" / "show_banner.png"
+    if _banner_auto.exists() and not start_frame_path:
+        start_frame_path = str(_banner_auto.relative_to(session_dir))
+        print(f"Auto-applying show banner as start frame: {start_frame_path}")
+        logger.info("Auto-applied show banner as start_frame_path: %s", start_frame_path)
+
     persisted_narrative_prompt = narrative_prompt or saved_prompt
 
     state.setdefault("settings", {}).update({
@@ -803,6 +863,9 @@ def main():
         "max_panels_per_episode": max_panels,
         "max_episode_duration_mins": max_duration,
         "tts_max_parallel_panels": tts_max_parallel_panels,
+        "segment_workers": segment_workers,
+        "scene_concurrency": scene_concurrency,
+        "cloud_workers": cloud_workers,
         "tts_provider": tts_provider,
         "gemini_tts_model": gemini_tts_model,
         "cloud_style": args.cloud_style or "cloud-none",
@@ -811,6 +874,11 @@ def main():
         "narration_mode": args.narration_mode or "hybrid_subtitles_clouds",
         "subtitle_scale": args.subtitle_scale if args.subtitle_scale is not None else 1.0,
         "episode_mode": args.episode_mode == "true",
+        "create_banner": create_banner,
+        "intro_only": intro_only,
+        "planner_skill_ids": valid_skill_ids,
+        "planner_skill_prompt": planner_skill_prompt or None,
+        "planner_skills_resolved": resolved_skill_blocks,
     })
     _save_state(state_path, state)
 
@@ -862,8 +930,12 @@ def main():
                 "lyria_model": args.lyria_model,
             },
             episode_mode=(args.episode_mode == "true"),
+            intro_only=intro_only,
             target_episode=args.episode,
             tracker=tracker,
+            planner_skill_ids=valid_skill_ids,
+            planner_skill_prompt=planner_skill_prompt,
+            planner_skills_catalog=planner_skills_catalog,
         )
         manga_board = planner.run(base_prompt, session_dir)
         min_fps, max_fps_assigned, avg_fps = _apply_dynamic_fps_policy(
@@ -890,9 +962,9 @@ def main():
                 tracker.save(session_dir)
             return
     else:
-        manga_board = _load_manga_board(session_dir, args.episode)
+        manga_board = _load_storyboard(session_dir, args.episode)
         if manga_board is None:
-            print("Error: No manga-board.json found. Run 'planner' step first.")
+            print("Error: No storyboard.json found. Run 'planner' step first.")
             sys.exit(1)
         min_fps, max_fps_assigned, avg_fps = _apply_dynamic_fps_policy(
             manga_board,
@@ -903,6 +975,13 @@ def main():
 
     ep_num = manga_board.get("episode_number", 1)
     ep_dir = session_dir / "episodes" / f"episode{ep_num}"
+    mode_scope = "intro" if intro_only else "generic"
+
+    def _episode_path(rel_path: str) -> Path:
+        return ep_dir / rel_path
+
+    def _mode_rel_path(*parts: str) -> str:
+        return "/".join([f"episodes/episode{ep_num}", mode_scope, *parts])
 
     # ── Calculate image budget ────────────────────────────────
     num_chars = len(manga_board.get("characters", []))
@@ -979,18 +1058,74 @@ def main():
         )
         char_manifest = char_gen.run(manga_board, session_dir)
         print("[step:chars] Character generation complete.")
+        logger.info("[step:chars] complete | session=%s", session_dir)
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["chars_generated"] = True
         _save_state(state_path, state)
+
+        # ── Banner generation (first episode / user-requested) ─────
+        _banner_path = session_dir / "banner" / "show_banner.png"
+        if create_banner and not _banner_path.exists():
+            logger.info("[step:banner] Generating show banner …")
+            _banner_result = char_gen.generate_banner(
+                project_name, session_dir,
+                manga_board.get("characters", []), char_manifest,
+            )
+            if _banner_result:
+                logger.info("[step:banner] Show banner saved: %s", _banner_result)
+                print(f"[step:banner] Show banner saved: {_banner_result}")
+                if not start_frame_path:
+                    start_frame_path = str(_banner_result.relative_to(session_dir))
+                    print(f"[step:banner] Auto-set start_frame_path = {start_frame_path}")
+                    state.setdefault("settings", {})["start_frame_path"] = start_frame_path
+                    _save_state(state_path, state)
     elif chars_manifest_path.exists():
         with open(chars_manifest_path, "r") as f:
             char_manifest = json.load(f)
 
     # ── 3. Scene Generation ───────────────────────────────────
-    scenes_manifest_path = session_dir / "scenes" / "scenes_manifest.json"
+    scenes_manifest_path = _episode_path("scenes/scenes_manifest.json")
     scenes_manifest = {}
     if run_scenes_step:
         print("[step:scenes] Starting scene generation.")
+        from agents.autoAnimator.chains.episode_planner import EpisodePlanner
         from agents.autoAnimator.chains.scene_gen import SceneGen
+
+        planner_preflight = EpisodePlanner(
+            model_name=planner_model,
+            director_model_name=director_model,
+            director_fallback_model_name=director_fallback_model,
+            project_name=project_name,
+            preset_prompt=preset_prompt,
+            niche_name=niche_key,
+            niche_context=niche_context,
+            start_frame_path=start_frame_path,
+            end_frame_path=end_frame_path,
+            tts_voices_pool=tts_voices_pool,
+            max_duration_mins=max_duration,
+            max_chars=max_chars,
+            max_panels=max_panels,
+            art_style=art_style,
+            aesthetic_guidance=aesthetic_guidance,
+            theme=resolved_theme,
+            model_stack={
+                "character_image_model": char_image_model,
+                "scene_image_model": scene_image_model,
+                "tts_engine": "edge-tts",
+                "music_provider": args.music_provider,
+                "lyria_model": args.lyria_model,
+            },
+            episode_mode=(args.episode_mode == "true"),
+            intro_only=intro_only,
+            target_episode=args.episode,
+            tracker=tracker,
+            planner_skill_ids=valid_skill_ids,
+            planner_skill_prompt=planner_skill_prompt,
+            planner_skills_catalog=planner_skills_catalog,
+        )
+        manga_board = planner_preflight.prepare_for_scene_generation(manga_board, session_dir)
+        ep_num = manga_board.get("episode_number", ep_num)
+        ep_dir = session_dir / "episodes" / f"episode{ep_num}"
+        mode_scope = "intro" if intro_only else "generic"
 
         scene_gen = SceneGen(
             image_model_name=scene_image_model,
@@ -1000,6 +1135,7 @@ def main():
             aesthetic_guidance=aesthetic_guidance,
             project_name=project_name,
             tracker=tracker,
+            scene_concurrency=scene_concurrency,
         )
         scenes_manifest = scene_gen.run(manga_board, char_manifest, session_dir)
         print("[step:scenes] Scene generation complete.")
@@ -1008,9 +1144,14 @@ def main():
     elif scenes_manifest_path.exists():
         with open(scenes_manifest_path, "r") as f:
             scenes_manifest = json.load(f)
+    else:
+        legacy_manifest_path = session_dir / "scenes" / "scenes_manifest.json"
+        if legacy_manifest_path.exists():
+            with open(legacy_manifest_path, "r") as f:
+                scenes_manifest = json.load(f)
 
     # ── 4. TTS Generation ─────────────────────────────────────
-    audio_dir = session_dir / "audio"
+    audio_dir = _episode_path("audio")
     audio_files = []
     if run_audio_step:
         print("[step:audio] Starting TTS generation.")
@@ -1032,6 +1173,8 @@ def main():
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["audio_generated"] = True
         _save_state(state_path, state)
     else:
+        if not audio_dir.exists():
+            audio_dir = session_dir / "audio"
         audio_files = sorted(
             [str(p) for p in audio_dir.glob("panel_*.mp3")]
             + [str(p) for p in audio_dir.glob("panel_*.wav")]
@@ -1043,17 +1186,22 @@ def main():
 
         settings = state.get("settings", {})
         print("[step:clouds] Starting overlay generation.")
+        primary_variant = "shorts" if args.format == "youtube_shorts" else "youtube_full"
+        primary_cloud_tag = "shorts" if primary_variant == "shorts" else "youtube_full"
 
-        def _run_cloud_widescreen():
-            print("[clouds:fullvideo] Generating widescreen overlays.")
+        def _run_cloud_primary():
+            print(f"[clouds:{primary_cloud_tag}] Generating primary overlays.")
+            primary_overlay_dir = _mode_rel_path(primary_variant, "overlays")
             cloud_gen = CloudGen(
                 fps=fps,
                 resolution=resolution,
                 project_name=project_name,
                 episode_number=ep_num,
-                overlay_dir_name="overlays",
-                log_prefix="[clouds:fullvideo]",
-                use_panel_fps=True,
+                overlay_dir_name=primary_overlay_dir,
+                scenes_dir_name=f"episodes/episode{ep_num}/scenes",
+                audio_dir_name=f"episodes/episode{ep_num}/audio",
+                log_prefix=f"[clouds:{primary_cloud_tag}]",
+                use_panel_fps=(primary_variant != "shorts"),
                 cloud_style=settings.get("cloud_style", "cloud-none"),
                 font_style=settings.get("font_style", "font-geist-sans"),
                 subtitle_style=settings.get("subtitle_style", "sub-clean-bottom"),
@@ -1065,9 +1213,10 @@ def main():
                 cloud_y=settings.get("cloud_y"),
                 cloud_w=settings.get("cloud_w"),
                 cloud_h=settings.get("cloud_h"),
+                cloud_workers=cloud_workers,
             )
             cloud_gen.run(manga_board, session_dir)
-            print("[clouds:fullvideo] Widescreen overlays ready.")
+            print(f"[clouds:{primary_cloud_tag}] Primary overlays ready.")
 
         def _run_cloud_shorts():
             shorts_cfg = output_presets.get("youtube_shorts", {})
@@ -1079,7 +1228,9 @@ def main():
                 resolution=shorts_resolution,
                 project_name=project_name,
                 episode_number=ep_num,
-                overlay_dir_name="overlays_youtube_shorts",
+                overlay_dir_name=_mode_rel_path("shorts", "overlays"),
+                scenes_dir_name=f"episodes/episode{ep_num}/scenes",
+                audio_dir_name=f"episodes/episode{ep_num}/audio",
                 log_prefix="[clouds:shorts]",
                 use_panel_fps=False,
                 cloud_style=settings.get("cloud_style", "cloud-none"),
@@ -1093,21 +1244,26 @@ def main():
                 cloud_y=settings.get("cloud_y"),
                 cloud_w=settings.get("cloud_w"),
                 cloud_h=settings.get("cloud_h"),
+                cloud_workers=cloud_workers,
             )
             shorts_cloud_gen.run(manga_board, session_dir)
             print("[clouds:shorts] Shorts overlays ready.")
 
-        should_generate_shorts_clouds = bool(args.format == "youtube_widescreen" and output_presets.get("youtube_shorts"))
+        shorts_enabled = (
+            args.youtube_shorts_export == "on"
+            or (args.youtube_shorts_export == "auto" and args.format == "youtube_widescreen")
+        )
+        should_generate_shorts_clouds = bool(shorts_enabled and output_presets.get("youtube_shorts"))
         if should_generate_shorts_clouds:
             with ThreadPoolExecutor(max_workers=2) as clouds_pool:
                 futures = [
-                    clouds_pool.submit(_run_cloud_widescreen),
+                    clouds_pool.submit(_run_cloud_primary),
                     clouds_pool.submit(_run_cloud_shorts),
                 ]
                 for f in futures:
                     f.result()
         else:
-            _run_cloud_widescreen()
+            _run_cloud_primary()
 
         print("[step:clouds] Overlay generation complete.")
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["clouds_generated"] = True
@@ -1155,18 +1311,29 @@ def main():
         if not scenes_manifest and scenes_manifest_path.exists():
             with open(scenes_manifest_path, "r") as f:
                 scenes_manifest = json.load(f)
+        if not scenes_manifest:
+            legacy_manifest_path = session_dir / "scenes" / "scenes_manifest.json"
+            if legacy_manifest_path.exists():
+                with open(legacy_manifest_path, "r") as f:
+                    scenes_manifest = json.load(f)
         if not audio_files:
+            if not audio_dir.exists():
+                audio_dir = session_dir / "audio"
             audio_files = sorted(
                 [str(p) for p in audio_dir.glob("panel_*.mp3")]
                 + [str(p) for p in audio_dir.glob("panel_*.wav")]
             )
 
-        def _render_widescreen() -> Path:
+        primary_variant = "shorts" if args.format == "youtube_shorts" else "youtube_full"
+
+        def _render_primary() -> Path:
+            output_suffix = (args.format or "youtube_widescreen")
             maker = MovieMaker(
                 fps=fps,
                 resolution=resolution,
                 enable_music=enable_music,
                 segment_workers=segment_workers,
+                use_panel_fps=(primary_variant != "shorts"),
             )
             return maker.run(
                 manga_board,
@@ -1174,15 +1341,17 @@ def main():
                 audio_files,
                 session_dir,
                 project_name=project_name,
-                overlay_dir_name="overlays",
+                output_suffix=output_suffix,
+                overlay_dir_name=_mode_rel_path(primary_variant, "overlays"),
+                output_dir_name=_mode_rel_path(primary_variant),
                 max_duration_seconds=float(max_duration * 60),
             )
 
         rendered_videos = []
         final_video = Path("")
 
-        # When YouTube Video is selected, also export a Shorts variant by default.
-        if args.format == "youtube_widescreen" and output_presets.get("youtube_shorts"):
+        # When YouTube full video is selected, also export a Shorts variant by default.
+        if shorts_enabled and output_presets.get("youtube_shorts"):
             shorts_cfg = output_presets.get("youtube_shorts", {})
             shorts_resolution = tuple(shorts_cfg.get("resolution", [1080, 1920]))
             shorts_fps = int(shorts_cfg.get("fps", fps))
@@ -1191,7 +1360,7 @@ def main():
                 from agents.autoAnimator.chains.cloud_gen import CloudGen
 
                 # Ensure shorts overlays exist; generate only if missing (e.g. video-only rerun).
-                shorts_overlay_root = session_dir / "overlays_youtube_shorts"
+                shorts_overlay_root = session_dir / _mode_rel_path("shorts", "overlays")
                 if not shorts_overlay_root.exists() or not any(shorts_overlay_root.iterdir()):
                     settings = state.get("settings", {})
                     print("[video:shorts] Shorts overlays missing; generating before render.")
@@ -1200,7 +1369,9 @@ def main():
                         resolution=shorts_resolution,
                         project_name=project_name,
                         episode_number=ep_num,
-                        overlay_dir_name="overlays_youtube_shorts",
+                        overlay_dir_name=_mode_rel_path("shorts", "overlays"),
+                        scenes_dir_name=f"episodes/episode{ep_num}/scenes",
+                        audio_dir_name=f"episodes/episode{ep_num}/audio",
                         log_prefix="[video:shorts:clouds]",
                         use_panel_fps=False,
                         cloud_style=settings.get("cloud_style", "cloud-none"),
@@ -1214,6 +1385,7 @@ def main():
                         cloud_y=settings.get("cloud_y"),
                         cloud_w=settings.get("cloud_w"),
                         cloud_h=settings.get("cloud_h"),
+                        cloud_workers=cloud_workers,
                     )
                     shorts_cloud_gen.run(manga_board, session_dir)
                 else:
@@ -1224,6 +1396,7 @@ def main():
                     resolution=shorts_resolution,
                     enable_music=enable_music,
                     segment_workers=segment_workers,
+                    use_panel_fps=False,
                 )
                 return shorts_maker.run(
                     manga_board,
@@ -1232,13 +1405,14 @@ def main():
                     session_dir,
                     project_name=project_name,
                     output_suffix="youtube_shorts",
-                    overlay_dir_name="overlays_youtube_shorts",
+                    overlay_dir_name=_mode_rel_path("shorts", "overlays"),
+                    output_dir_name=_mode_rel_path("shorts"),
                     max_duration_seconds=float(max_duration * 60),
                 )
 
             with ThreadPoolExecutor(max_workers=2) as render_pool:
                 print("[step:video] Rendering fullvideo and shorts in parallel.")
-                wide_future = render_pool.submit(_render_widescreen)
+                wide_future = render_pool.submit(_render_primary)
                 shorts_future = render_pool.submit(_render_shorts)
                 final_video = wide_future.result()
                 shorts_video = shorts_future.result()
@@ -1248,7 +1422,7 @@ def main():
             if shorts_video:
                 rendered_videos.append(str(shorts_video))
         else:
-            final_video = _render_widescreen()
+            final_video = _render_primary()
             if final_video:
                 rendered_videos.append(str(final_video))
         state.setdefault("episodes", {}).setdefault(str(ep_num), {})["status"] = "complete"
@@ -1293,16 +1467,20 @@ def _save_state(state_path: Path, state: dict):
         os.replace(tmp_path, state_path)
 
 
-def _load_manga_board(session_dir: Path, episode_num: int = None) -> dict | None:
+def _load_storyboard(session_dir: Path, episode_num: int = None) -> dict | None:
+    """Load storyboard JSON for the target episode."""
+    _BOARD_NAMES = ("storyboard.json",)
     episodes_dir = session_dir / "episodes"
     if not episodes_dir.exists():
         return None
 
     if episode_num:
-        board_path = episodes_dir / f"episode{episode_num}" / "manga-board.json"
-        if board_path.exists():
-            with open(board_path, "r") as f:
-                return json.load(f)
+        ep_dir = episodes_dir / f"episode{episode_num}"
+        for name in _BOARD_NAMES:
+            board_path = ep_dir / name
+            if board_path.exists():
+                with open(board_path, "r") as f:
+                    return json.load(f)
         return None
 
     existing = sorted(
@@ -1310,10 +1488,11 @@ def _load_manga_board(session_dir: Path, episode_num: int = None) -> dict | None
         key=lambda p: p.name,
     )
     if existing:
-        board_path = existing[-1] / "manga-board.json"
-        if board_path.exists():
-            with open(board_path, "r") as f:
-                return json.load(f)
+        for name in _BOARD_NAMES:
+            board_path = existing[-1] / name
+            if board_path.exists():
+                with open(board_path, "r") as f:
+                    return json.load(f)
     return None
 
 

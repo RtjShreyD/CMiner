@@ -1,7 +1,7 @@
 """
 TTS Generator – Multi-character dialogue audio per panel.
 
-Produces: audio/panel_XX.mp3 + audio/panel_XX_timing.json
+Produces: episodes/episodeN/audio/panel_XX.mp3 + episodes/episodeN/audio/panel_XX_timing.json
 Uses Edge-TTS with per-character voice assignment.
 
 Note: Edge-TTS v7+ only emits SentenceBoundary events (no WordBoundary).
@@ -54,6 +54,36 @@ class TTSGen:
             "neutral": ("+0%", "+0Hz"),
         }
         return profiles.get(key, profiles["neutral"])
+
+    @staticmethod
+    def _expressive_line_text(line: str, emotion: str, delivery_mode: str) -> str:
+        """Apply lightweight punctuation/prosody hints while preserving spoken meaning.
+
+        This improves pauses and expression in synthesized speech without changing
+        subtitle source text (subtitles still come from original dialogue lines).
+        """
+        text = str(line or "").strip()
+        if not text:
+            return text
+
+        mode = str(delivery_mode or "dialogue").strip().lower()
+        emo = str(emotion or "neutral").strip().lower()
+
+        if mode in {"narration", "voiceover"}:
+            if not text.endswith((".", "!", "?", "...")):
+                text = f"{text}."
+            text = text.replace(" - ", ", ")
+
+        if emo in {"tense", "overwhelmed", "sad"}:
+            if "," not in text and len(text.split()) > 7:
+                words = text.split()
+                cut = max(3, len(words) // 2)
+                text = " ".join(words[:cut]) + ", " + " ".join(words[cut:])
+
+        if emo in {"curious", "sarcastic"} and not text.endswith(("?", "!?")) and len(text.split()) > 5:
+            text = text + "?"
+
+        return text
 
     def _record_tts_call(
         self,
@@ -160,7 +190,8 @@ class TTSGen:
 
     def run(self, manga_board: Dict[str, Any], session_dir: Path) -> List[str]:
         print("--- Pipeline: TTS Generation ---")
-        audio_dir = session_dir / "audio"
+        current_episode = max(1, int(manga_board.get("episode_number", 1) or 1))
+        audio_dir = session_dir / "episodes" / f"episode{current_episode}" / "audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
         signatures_path = audio_dir / "panel_signatures.json"
         panel_signatures: Dict[str, str] = {}
@@ -334,7 +365,9 @@ class TTSGen:
                 voice = part["voice"]
                 char_name = part["character"]
                 emotion = str(part.get("emotion", "neutral") or "neutral")
+                delivery_mode = str(part.get("delivery_mode", "dialogue") or "dialogue")
                 rate, pitch = self._emotion_tts_profile(emotion)
+                tts_line = self._expressive_line_text(line, emotion, delivery_mode)
 
                 fallback_voice = "en-US-AriaNeural"
                 if self._is_hindi_text(line):
@@ -350,7 +383,7 @@ class TTSGen:
                     for attempt in range(1, 4):
                         try:
                             t0 = time.perf_counter()
-                            communicate = edge_tts.Communicate(line, candidate_voice, rate=rate, pitch=pitch)
+                            communicate = edge_tts.Communicate(tts_line, candidate_voice, rate=rate, pitch=pitch)
                             line_audio = bytearray()
                             word_timings = []
                             sentence_boundaries = []
@@ -394,14 +427,13 @@ class TTSGen:
                             if word_timings:
                                 last = word_timings[-1]
                                 cumulative_offset = last["offset"] + last["duration"]
-                                cumulative_offset += 3_000_000  # ~300ms speaker gap
                             elif sentence_boundaries:
                                 last_sb = sentence_boundaries[-1]
-                                cumulative_offset += last_sb["offset"] + last_sb["duration"] + 3_000_000
+                                cumulative_offset += last_sb["offset"] + last_sb["duration"]
                             else:
                                 # No boundary metadata available; estimate based on words.
                                 word_count = max(1, len(line.split()))
-                                cumulative_offset += (word_count * 260_0000) + 3_000_000
+                                cumulative_offset += (word_count * 260_0000)
 
                             all_timing.extend(word_timings)
                             successful_lines += 1

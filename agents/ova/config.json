@@ -1,9 +1,8 @@
 {
   "defaults": {
     "subtitle_style": "sub-clean-bottom",
-    "narration_mode": "hybrid_subtitles_clouds",
-    "subtitle_scale": 1.0,
-    "font_style": "font-geist-sans"
+    "font_style": "font-geist-sans",
+    "subtitle_scale": 1.0
   },
   "models": {
     "planner_model": "models/gemini-flash-latest",
@@ -12,7 +11,13 @@
     "max_image_requests": 36,
     "max_chars_per_episode": 6,
     "max_panels_per_episode": 20,
-    "max_episode_duration_mins": 2
+    "max_episode_duration_mins": 2,
+    "tts_max_parallel_panels": 4,
+    "segment_workers": 2,
+    "music_provider": "lyria",
+    "lyria_model": "lyria-3-clip-preview",
+    "tts_provider": "edge",
+    "gemini_tts_model": "models/gemini-2.5-flash-tts"
   },
   "voice_profiles": {
     "narrator": ["en-US-AriaNeural", "en-GB-SoniaNeural"],

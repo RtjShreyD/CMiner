@@ -74,6 +74,17 @@ def main():
         help="Lyria model id when --music_provider=lyria",
     )
     parser.add_argument(
+        "--tts_provider",
+        choices=["edge", "gemini"],
+        default="edge",
+        help="TTS provider (edge or gemini)",
+    )
+    parser.add_argument(
+        "--gemini_tts_model",
+        default="models/gemini-2.5-flash-tts",
+        help="Gemini TTS model id when --tts_provider=gemini",
+    )
+    parser.add_argument(
         "--episode_mode",
         choices=["true", "false"],
         default="false",
@@ -208,6 +219,8 @@ def main():
         "episode_mode": args.episode_mode == "true",
         "target_duration_mins": target_duration,
         "target_duration_seconds": int(target_duration * 60),
+        "tts_provider": args.tts_provider or models_config.get("tts_provider", "edge"),
+        "gemini_tts_model": args.gemini_tts_model or models_config.get("gemini_tts_model", "models/gemini-2.5-flash-tts"),
     })
     _save_state(state_path, state)
 
@@ -442,7 +455,7 @@ def _load_storyboard(session_dir: Path, episode_num: int = None) -> dict | None:
         return None
 
     def _try_load(ep_dir: Path) -> dict | None:
-        for name in ("storyboard.json", "manga-board.json"):
+        for name in ("storyboard.json",):
             p = ep_dir / name
             if p.exists():
                 with open(p, "r") as f:

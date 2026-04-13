@@ -23,7 +23,7 @@ from PIL import Image
 SESSION_DIR   = Path(__file__).parent.parent / "outputs" / "5786188" / "ova"
 SCENES_DIR    = SESSION_DIR / "scenes"
 OUT_DIR       = SESSION_DIR / "html_overlays"
-BOARD_PATH    = SESSION_DIR / "episodes" / "episode1" / "manga-board.json"
+BOARD_PATH    = SESSION_DIR / "episodes" / "episode1" / "storyboard.json"
 RESOLUTION    = (1920, 1080)
 
 
