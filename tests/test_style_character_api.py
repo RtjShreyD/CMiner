@@ -42,7 +42,7 @@ class StyleCharacterApiTests(unittest.TestCase):
 
         payload = {
             "id": pack_id,
-            "name": "Core Detective Cast",
+            "name": f"Core Detective Cast {suffix}",
             "source_agent": "charGen",
             "tags": ["manga", "detective"],
             "characters": [
@@ -52,7 +52,7 @@ class StyleCharacterApiTests(unittest.TestCase):
                     "archetype": "hero",
                     "visual_prompt": "Tall detective in futuristic trench coat",
                     "tags": ["lead"],
-                    "anchor_images": ["chars/kaelen_front.png"],
+                    "anchor_images": ["library/styles/previews/render-cinematic-anime.png"],
                     "metadata": {"voice_profile": "hero"},
                 }
             ],
@@ -70,7 +70,7 @@ class StyleCharacterApiTests(unittest.TestCase):
         get_pack = self.client.get(f"/api/characters/packs/{pack_id}")
         self.assertEqual(get_pack.status_code, 200)
         body = get_pack.json()
-        self.assertEqual(body["name"], "Core Detective Cast")
+        self.assertEqual(body["name"], f"Core Detective Cast {suffix}")
         self.assertEqual(body["characters"][0]["display_name"], "Kaelen Thorne")
 
 

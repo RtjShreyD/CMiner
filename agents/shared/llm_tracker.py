@@ -42,6 +42,28 @@ class LLMTracker:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
 
+    def record_event(
+        self,
+        *,
+        model: str,
+        purpose: str,
+        duration_ms: float = 0.0,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> None:
+        event = {
+            "model": model,
+            "purpose": purpose,
+            "input_tokens": int(input_tokens or 0),
+            "output_tokens": int(output_tokens or 0),
+            "duration_ms": round(float(duration_ms or 0.0), 1),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if metadata:
+            event["metadata"] = metadata
+        self.calls.append(event)
+
     # ── persistence ────────────────────────────────────────────
 
     def save(self, session_dir: Path) -> Path:
@@ -64,6 +86,38 @@ class LLMTracker:
         total_input = sum(c["input_tokens"] for c in all_calls)
         total_output = sum(c["output_tokens"] for c in all_calls)
         models_used = sorted(set(c["model"] for c in all_calls))
+        calls_per_model: dict[str, int] = {}
+        model_analytics: dict[str, dict[str, float | int]] = {}
+        for call in all_calls:
+            model = str(call.get("model", "unknown"))
+            calls_per_model[model] = calls_per_model.get(model, 0) + 1
+            bucket = model_analytics.setdefault(
+                model,
+                {
+                    "calls": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_tokens": 0,
+                    "duration_ms_total": 0.0,
+                    "duration_ms_avg": 0.0,
+                },
+            )
+            in_tok = int(call.get("input_tokens", 0) or 0)
+            out_tok = int(call.get("output_tokens", 0) or 0)
+            dur = float(call.get("duration_ms", 0.0) or 0.0)
+            bucket["calls"] = int(bucket["calls"]) + 1
+            bucket["input_tokens"] = int(bucket["input_tokens"]) + in_tok
+            bucket["output_tokens"] = int(bucket["output_tokens"]) + out_tok
+            bucket["total_tokens"] = int(bucket["total_tokens"]) + in_tok + out_tok
+            bucket["duration_ms_total"] = round(float(bucket["duration_ms_total"]) + dur, 1)
+
+        for model, bucket in model_analytics.items():
+            calls = int(bucket.get("calls", 0) or 0)
+            avg = (float(bucket.get("duration_ms_total", 0.0) or 0.0) / calls) if calls else 0.0
+            bucket["duration_ms_avg"] = round(avg, 1)
+
+        model_analytics = dict(sorted(model_analytics.items(), key=lambda kv: kv[0]))
+        calls_per_model = dict(sorted(calls_per_model.items(), key=lambda kv: kv[0]))
 
         report = {
             "total_calls": len(all_calls),
@@ -71,6 +125,8 @@ class LLMTracker:
             "total_output_tokens": total_output,
             "total_tokens": total_input + total_output,
             "models_used": models_used,
+            "calls_per_model": calls_per_model,
+            "model_analytics": model_analytics,
             "calls": all_calls,
         }
 

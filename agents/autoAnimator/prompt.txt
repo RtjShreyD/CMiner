@@ -1,0 +1,27 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# autoAnimator — Default Baseline Prompt
+#
+# This file is the BASELINE STORY PREMISE that appears in the episode planner
+# as "BASE STORY PREMISE" when no user prompt is provided at runtime.
+#
+# HOW TO USE:
+#   • For a new original series: replace this file with your show concept.
+#   • For a rich show universe (show bible): paste your full reference document
+#     into the "preset_prompt" parameter — the planner will parse the entire
+#     document as an immutable source-of-truth for the series.
+#   • The "preset_prompt" field overrides this file when generating episodes
+#     with --preset_prompt (or via the API).
+#
+# SHOW BIBLE SUPPORT:
+#   When a preset_prompt containing a full show bible is provided (character
+#   roster, episode anatomy, stage layout, visual identity, speech bubble
+#   styles, comedic/dramatic rhythm rules), the planner will:
+#     1. Extract every character with their visual identity and bubble style.
+#     2. Enforce the defined stage layout and camera geometry.
+#     3. Follow the specified comedic/dramatic rhythm pattern.
+#     4. Apply all per-character speech bubble styles to every spoken panel.
+#     5. Structure episode beats to match the show's defined episode anatomy.
+#
+# DEFAULT (replace this with your own story concept):
+# ──────────────────────────────────────────────────────────────────────────────
+An episodic animated series. Define your story universe, characters, and episode concept using the preset_prompt parameter for full show bible support.

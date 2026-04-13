@@ -1,0 +1,107 @@
+{
+  "models": {
+    "planner_model": "models/gemini-flash-latest",
+    "director_model": "models/gemini-flash-latest",
+    "director_fallback_model": "models/gemini-2.0-flash-lite",
+    "character_image_model": "models/gemini-2.5-flash-image",
+    "scene_image_model": "models/gemini-2.5-flash-image",
+    "max_image_requests": 50,
+    "max_chars_per_episode": 3,
+    "max_panels_per_episode": 50,
+    "max_episode_duration_mins": 1,
+    "tts_max_parallel_panels": 4,
+    "segment_workers": 4,
+    "scene_concurrency": 4,
+    "cloud_workers": 4,
+    "music_provider": "lyria",
+    "lyria_model": "lyria-3-clip-preview",
+    "tts_provider": "edge",
+    "gemini_tts_model": "models/gemini-2.5-flash-tts"
+  },
+  "voice_profiles": {
+    "voice_a": ["en-US-AriaNeural", "en-GB-SoniaNeural"],
+    "voice_b": ["en-US-ChristopherNeural"],
+    "voice_c": ["en-GB-RyanNeural"],
+    "voice_d": ["en-IN-NeerjaNeural", "hi-IN-SwaraNeural"],
+    "hindi": ["hi-IN-SwaraNeural", "hi-IN-MadhurNeural"]
+  },
+  "video": {
+    "resolution": [1280, 720],
+    "target_duration_mins": 5
+  },
+  "themes": {
+    "scary_stories": "A dark, suspenseful script with cliffhangers, ominous imagery, and intense reveal moments.",
+    "mystery_adventure": "A mystery/adventure tone with curiosity-driven hook, plot twists, and structured reveal.",
+    "slice_of_life": "A warm, calm slice-of-life narrative with relatable character moments and gentle humour.",
+    "magic_show": "A theatrical magic-show narrative with wonder, misdirection, reveal beats, and crowd reactions.",
+    "sci_fi_epic": "A sweeping sci-fi tone with futuristic worldbuilding, high-stakes conflict, and awe-driven discoveries.",
+    "comedy_sketch": "A light comedy rhythm with witty banter, situational humor, and punchline-driven scene transitions.",
+    "cartoon_adventure": "A playful cartoon-adventure tone with exaggerated action, bright emotional swings, and family-friendly fun.",
+    "ghibli_wonder": "A gentle, whimsical tone inspired by pastoral wonder, emotional intimacy, and environmental magic.",
+    "stage_show_portal_satire": "A high-energy live stage show tone with absurd sci-fi comedy, deadpan banter, chaotic invention reveals, and sharp audience-reactive pacing."
+  },
+  "art_styles": {
+    "cinematic_anime": "cinematic anime, high detail, dynamic dramatic composition, volumetric lighting",
+    "noir_comic": "black-and-white noir comic, textured inking, strong contrast, moody lighting",
+    "sci_fi_neon": "neon sci-fi, futuristic cityscape, high saturation chromatic highlights",
+    "horror_manga": "horror manga, gritty shadows, dramatic facial expressions, eerie atmosphere",
+    "magic_illusion_stage": "fantasy magic-show stage aesthetic, luminous spell effects, velvet curtains, theatrical spotlighting",
+    "comedy_cartoon": "clean cartoon linework, expressive faces, comedic timing poses, bright saturated color palette",
+    "ghibli_watercolor": "soft hand-painted watercolor anime style, warm natural lighting, lush backgrounds, whimsical atmosphere",
+    "retro_pop_comic": "retro pop comic halftone textures, bold outlines, dynamic captions, vibrant primary colors",
+    "space_opera_cinematic": "space-opera cinematic concept art, nebula backdrops, epic framing, dramatic rim lighting",
+    "rick_morty_stage_show": "stylized adult cartoon anime hybrid with bold outlines, simplified expressive anatomy, exaggerated reaction faces, sci-fi gadget chaos, punchy stage lighting, and comedic timing-driven poses"
+  },
+  "output_presets": {
+    "tiktok": {"resolution": [1080, 1920], "fps": 30, "duration_mins": 1, "aspect": "9:16"},
+    "instagram_reels": {"resolution": [1080, 1920], "fps": 30, "duration_mins": 1, "aspect": "9:16"},
+    "youtube_shorts": {"resolution": [1080, 1920], "fps": 30, "duration_mins": 1, "aspect": "9:16"},
+    "youtube_widescreen": {"resolution": [1920, 1080], "fps": 30, "duration_mins": 5, "aspect": "16:9"}
+  },
+  "niche_bundles": {
+    "out_of_box_simple": {
+      "label": "Out-of-box simple",
+      "director_context": "Keep a clear and broadly appealing storytelling rhythm with low cognitive overhead. Favor concise setup, one strong central conflict beat, and clean payoff. Avoid over-complication and keep staging easy to render while still cinematic."
+    },
+    "1v1_battle": {
+      "label": "1v1 battle",
+      "director_context": "Design the episode around a two-character duel arc: pre-fight tension, tactical exchange, escalation, and decisive closing beat. Prioritize dynamic motion cues, readable action geography, and emotional momentum with minimal cast sprawl."
+    },
+    "1v1_podcast": {
+      "label": "1v1 podcast",
+      "director_context": "Structure as a two-host conversational format with strong verbal chemistry. Focus on topic progression, reaction shots, and pacing beats that alternate insight, conflict, and humor. Keep scenes visually varied through camera language despite limited physical action."
+    },
+    "stage_show": {
+      "label": "Stage show",
+      "director_context": "Frame the episode as a live stage performance with a persistent stage map (judges desk, demo platform, audience axis, LED backdrop). Keep every character's visual identity, spatial position, and role continuity strongly consistent while evolving pose, expression, and camera dynamics shot-by-shot. Use anime-style shot progression (establishing wide, presenter medium, judge close reaction, device hero shot, crowd beat), keep dialogue and scene beats tightly synchronized, enforce strict panel-to-panel continuity, and close with a clear applause/payoff moment. Prefer a stylized adult cartoon anime look with sci-fi satire energy (rick_morty_stage_show art style) for this niche unless user explicitly overrides style. SPEECH BUBBLE MANDATE: every panel with spoken lines must include a speech_bubbles array rendered directly in the scene image. Use each character's assigned bubble_style (from characters array or show bible). Bubbles must contain exact verbatim dialogue text, be clearly legible with manga-style rendering, and must not obscure character faces or the dominant visual focus. SHOW BIBLE PRIORITY: if the series preset_prompt is a full show format document, extract and enforce all defined rules (character roster, bubble styles, stage geometry, comedic rhythm pattern, episode anatomy) as hard constraints."
+    },
+    "series_drama": {
+      "label": "Series drama",
+      "director_context": "Build this as an ongoing high-stakes drama series with strong episode-to-episode continuity, emotionally charged character arcs, and cinematic escalation. Blend intense dialogue beats, occasional high-impact fight sequences, and dynamic visual set-pieces inspired by long-running action dramas like Dragon Ball Super and Swat Kats. Keep pacing serialized: setup, emotional conflict, strategic reveal, and a compelling continuation hook."
+    }
+  },
+  "planner_skills": {
+    "science_object_rigor": {
+      "label": "Science Object Rigor",
+      "description": "Use plausible engineering/science constraints while designing devices and inventions.",
+      "prompt": "For every major object/invention, enforce physically plausible behavior, explicit materials/components, realistic operating constraints, and cause-effect consistency in panels and dialogue. Avoid magical unexplained behavior unless explicitly requested."
+    },
+    "infographic_storyboard": {
+      "label": "Infographic Storyboard Mode",
+      "description": "Favor explanatory visual pedagogy panels for technical ideas.",
+      "prompt": "When concepts are explanatory, insert infographic-like manga panels with labels, arrows, comparison frames, and process steps while maintaining narrative continuity and cinematic rhythm."
+    },
+    "safety_and_ethics": {
+      "label": "Safety and Ethics Lens",
+      "description": "Add risk-awareness and ethical guardrails in high-impact concepts.",
+      "prompt": "For potentially dangerous technology/science scenarios, include explicit safety constraints, failure modes, and ethical considerations in story decisions, object behavior, and dialogue framing."
+    }
+  },
+  "tts_voices_pool": {
+    "voice_a": ["en-US-AriaNeural", "en-GB-SoniaNeural"],
+    "voice_b": ["en-US-ChristopherNeural"],
+    "voice_c": ["en-GB-RyanNeural"],
+    "voice_d": ["en-IN-NeerjaNeural", "hi-IN-SwaraNeural"],
+    "hindi": ["hi-IN-SwaraNeural", "hi-IN-MadhurNeural"]
+  }
+}

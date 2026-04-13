@@ -1,0 +1,20 @@
+{
+  "id": "style-d902a899",
+  "name": "Cyber Neon Subtitle",
+  "category": "subtitle",
+  "version": "v1",
+  "tags": [
+    "neon",
+    "subtitle"
+  ],
+  "status": "active",
+  "preview_assets": {
+    "thumbnail": "samples/subtitle-neon.png"
+  },
+  "config_json": {
+    "font": "Orbitron",
+    "stroke": 2
+  },
+  "created_at": "2026-04-05T10:18:29.691399+00:00",
+  "updated_at": "2026-04-05T10:18:29.691399+00:00"
+}

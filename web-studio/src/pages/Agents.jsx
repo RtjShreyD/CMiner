@@ -4,22 +4,30 @@ import axios from 'axios';
 import { useNavigate, useParams } from 'react-router-dom';
 import SessionTreeView from '../components/SessionTreeView';
 import FilePreviewPane from '../components/FilePreviewPane';
+import OvaWorkspace from './OvaWorkspace';
 
 const API_BASE = 'http://localhost:8000/api';
 const WS_BASE = 'ws://localhost:8000/api';
 const MEDIA_BASE = 'http://localhost:8000/media';
 const LIBRARY_MEDIA_BASE = 'http://localhost:8000/library-media';
+const PIPELINE_START_TIME_KEY = 'autoanimator.pipelineStartTimeBySession';
+const PIPELINE_END_TIME_KEY = 'autoanimator.pipelineEndTimeBySession';
 const AGENTS_LIST = [
   { id: 'autoAnimator', name: 'AutoAnimator', desc: 'Focused preview-driven animator powered by Narrative Manga backend.' },
+  { id: 'ova', name: 'OVA Agent', desc: 'Cinematic anime OVA pipeline — subtitle-only rendering, full episodic continuity.' },
 ];
-const EXECUTION_AGENT_BY_UI_AGENT = {
-  autoAnimator: 'narrativeManga',
-};
+const AUTOANIMATOR_TEMPLATE_SESSION_ID = '1392763';
 const VALID_AGENT_IDS = new Set(AGENTS_LIST.map((a) => a.id));
-const AUTOANIMATOR_TEMPLATE_SESSION = '1392763/narrativeManga';
+const DEFAULT_AUTOANIMATOR_LIMITS = {
+  maxImageRequests: 50,
+  maxCharsPerEpisode: 3,
+  maxPanelsPerEpisode: 50,
+  maxEpisodeDurationMins: 1,
+};
 const DEFAULT_SECTION_LOCKS = {
   step0: true,
   planner: true,
+  preset_prompt: true,
   chars: true,
   scenes: true,
   audio: true,
@@ -66,6 +74,12 @@ function mediaUrl(path) {
   return `${MEDIA_BASE}/${encoded}`;
 }
 
+function isAutoAnimatorSessionFolderName(name) {
+  if (typeof name !== 'string') return false;
+  const lower = name.trim().toLowerCase();
+  return lower === 'autoanimator' || lower.endsWith('_autoanimator');
+}
+
 export default function Agents() {
   const navigate = useNavigate();
   const { agentId, sessionMode: modeParam, sessionId } = useParams();
@@ -74,6 +88,25 @@ export default function Agents() {
   const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState([]);
   const [jobId, setJobId] = useState(null);
+  const JOB_ID_STORAGE_KEY = 'autoanimator_job_id';
+  const [pipelineStartBySession, setPipelineStartBySession] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem(PIPELINE_START_TIME_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+  const [pipelineEndBySession, setPipelineEndBySession] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem(PIPELINE_END_TIME_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
   const [selectedAgent, setSelectedAgent] = useState('autoAnimator');
   const [sessionMode, setSessionMode] = useState('new');
   const [sessionPath, setSessionPath] = useState('');
@@ -83,8 +116,19 @@ export default function Agents() {
   const [sessionChars, setSessionChars] = useState([]);
 
   const [narrativePrompt, setNarrativePrompt] = useState('A sci-fi detective embarks on a neon city mystery.');
-  const [preset, setPreset] = useState('cinematic_anime');
-  const [format, setFormat] = useState('tiktok');
+  const [presetPrompt, setPresetPrompt] = useState('');
+  const [projectName, setProjectName] = useState('');
+  const [projectNameUserEdited, setProjectNameUserEdited] = useState(false);
+  const [theme, setTheme] = useState('auto-select');
+  const [preset, setPreset] = useState('auto-select');
+  const [niche, setNiche] = useState('auto-select');
+  const [plannerThemes, setPlannerThemes] = useState({});
+  const [plannerArtStyles, setPlannerArtStyles] = useState({});
+  const [plannerNiches, setPlannerNiches] = useState({});
+  const [plannerSkillsCatalog, setPlannerSkillsCatalog] = useState({});
+  const [plannerSkillIds, setPlannerSkillIds] = useState([]);
+  const [plannerSkillPrompt, setPlannerSkillPrompt] = useState('');
+  const [format, setFormat] = useState('youtube_widescreen');
   const [cloudStyle, setCloudStyle] = useState('cloud-fluffy-default');
   const [fontStyle, setFontStyle] = useState('font-inter-clean');
   const [subtitleStyle, setSubtitleStyle] = useState('subtitle-neon-clean');
@@ -92,13 +136,16 @@ export default function Agents() {
   const [characterPackId, setCharacterPackId] = useState('');
   const [reuseSessionChars, setReuseSessionChars] = useState(false);
   const [selectedSessionCharacter, setSelectedSessionCharacter] = useState('');
-  const [enableMusic, setEnableMusic] = useState(false);
-  const [musicProvider, setMusicProvider] = useState('strudel');
+  const [enableMusic, setEnableMusic] = useState(true);
+  const [createBanner, setCreateBanner] = useState(false);
+  const [musicProvider, setMusicProvider] = useState('lyria');
   const [lyriaModel, setLyriaModel] = useState('lyria-3-clip-preview');
-  const [maxImageRequests, setMaxImageRequests] = useState(50);
-  const [maxCharsPerEpisode, setMaxCharsPerEpisode] = useState(5);
-  const [maxPanelsPerEpisode, setMaxPanelsPerEpisode] = useState(50);
-  const [maxEpisodeDurationMins, setMaxEpisodeDurationMins] = useState(5);
+  const [ttsProvider, setTtsProvider] = useState('edge');
+  const [geminiTtsModel, setGeminiTtsModel] = useState('models/gemini-2.5-flash-tts');
+  const [maxImageRequests, setMaxImageRequests] = useState(DEFAULT_AUTOANIMATOR_LIMITS.maxImageRequests);
+  const [maxCharsPerEpisode, setMaxCharsPerEpisode] = useState(DEFAULT_AUTOANIMATOR_LIMITS.maxCharsPerEpisode);
+  const [maxPanelsPerEpisode, setMaxPanelsPerEpisode] = useState(DEFAULT_AUTOANIMATOR_LIMITS.maxPanelsPerEpisode);
+  const [maxEpisodeDurationMins, setMaxEpisodeDurationMins] = useState(DEFAULT_AUTOANIMATOR_LIMITS.maxEpisodeDurationMins);
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
 
   const [selectedFile, setSelectedFile] = useState(null);
@@ -132,23 +179,70 @@ export default function Agents() {
   const [stepReset, setStepReset] = useState({ planner: false, chars: false, scenes: false, audio: false, texts: false, music: false, video: false });
   const [episodesMode, setEpisodesMode] = useState('new');
   const [episodeMode, setEpisodeMode] = useState(true);
+  const [introOnly, setIntroOnly] = useState(true);
   const [targetEpisode, setTargetEpisode] = useState('');
   const [sourceCharSession, setSourceCharSession] = useState('');
   const [sourceCharPath, setSourceCharPath] = useState('');
+  const [startFrameFile, setStartFrameFile] = useState(null);
+  const [endFrameFile, setEndFrameFile] = useState(null);
+  const [startFramePath, setStartFramePath] = useState('');
+  const [endFramePath, setEndFramePath] = useState('');
   const [availableModelsByTask, setAvailableModelsByTask] = useState({ planner: [], chars: [], scenes: [] });
   const [plannerModel, setPlannerModel] = useState('models/gemini-flash-latest');
   const [charsModel, setCharsModel] = useState('models/gemini-2.5-flash-image');
   const [scenesModel, setScenesModel] = useState('models/gemini-2.5-flash-image');
   const [charPromptItems, setCharPromptItems] = useState([]);
+  const [objectPromptItems, setObjectPromptItems] = useState([]);
   const [charRedoBusy, setCharRedoBusy] = useState('');
   const [toasts, setToasts] = useState([]);
   const [sectionLocks, setSectionLocks] = useState({
     ...DEFAULT_SECTION_LOCKS,
   });
 
+  const selectedNicheConfig = plannerNiches && niche && niche !== 'auto-select'
+    ? plannerNiches[niche]
+    : null;
+  const selectedNicheDirectorContext = String(selectedNicheConfig?.director_context || '').trim();
+
   const ws = useRef(null);
+  const wsIntentionalCloseRef = useRef(false);
+  const sessionPathRef = useRef('');
   const scrollRef = useRef(null);
   const buildpackRequestSeq = useRef(0);
+
+  useEffect(() => {
+    sessionPathRef.current = sessionPath || '';
+  }, [sessionPath]);
+
+  const setSessionPipelineStartTime = (path, isoTs) => {
+    const p = String(path || '').trim();
+    const ts = String(isoTs || '').trim();
+    if (!p || !ts) return;
+    setPipelineStartBySession((prev) => {
+      const next = { ...prev, [p]: ts };
+      try {
+        window.localStorage.setItem(PIPELINE_START_TIME_KEY, JSON.stringify(next));
+      } catch {
+        // Ignore localStorage errors.
+      }
+      return next;
+    });
+  };
+
+  const setSessionPipelineEndTime = (path, isoTs) => {
+    const p = String(path || '').trim();
+    const ts = String(isoTs || '').trim();
+    if (!p || !ts) return;
+    setPipelineEndBySession((prev) => {
+      const next = { ...prev, [p]: ts };
+      try {
+        window.localStorage.setItem(PIPELINE_END_TIME_KEY, JSON.stringify(next));
+      } catch {
+        // Ignore localStorage errors.
+      }
+      return next;
+    });
+  };
 
   const pushToast = (type, message) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -169,7 +263,9 @@ export default function Agents() {
       if (!buildpackSubtitleStyle) missing.push('Step 0: subtitle style');
       if (!buildpackCloudStyle) missing.push('Step 0: cloud style');
     }
-    if (!narrativePrompt || !narrativePrompt.trim()) missing.push('Step 1: narrative prompt');
+    if ((!narrativePrompt || !narrativePrompt.trim()) && !(episodeMode && presetPrompt.trim())) {
+      missing.push('Step 1: narrative prompt');
+    }
     if (!preset) missing.push('Step 1: art style');
     if (!plannerModel) missing.push('Step 1: planner model');
     return missing;
@@ -198,14 +294,42 @@ export default function Agents() {
 
     try {
       setRunning(true);
-      setLogs((prev) => [...prev, { type: 'system', msg: `Running full pipeline via ${agentName}...` }]);
-      await runNarrativeStep('all');
+      const startedAt = new Date().toISOString();
+      setLogs([{ type: 'system', msg: `Running full pipeline via ${agentName}...` }]);
+      await runNarrativeStep('all', { pipelineStartedAt: startedAt, resetConsole: true });
     } catch (err) {
       setLogs((prev) => [...prev, { type: 'error', msg: `Failed to start: ${err.message}` }]);
       setRunning(false);
       return;
     }
     setRunning(false);
+  };
+
+  const goBackToAgentSelector = () => {
+    setPage('selector');
+    setSessionMode('new');
+    setSessionPath('');
+    navigate('/agents');
+  };
+
+  const startNewSessionFromWorkspace = () => {
+    setSessionMode('new');
+    setSessionPath('');
+    setProjectName('');
+    setProjectNameUserEdited(false);
+    setNiche('auto-select');
+    setPlannerSkillIds([]);
+    setPlannerSkillPrompt('');
+    setPresetPrompt('');
+    setStartFrameFile(null);
+    setEndFrameFile(null);
+    setStartFramePath('');
+    setEndFramePath('');
+    setMaxImageRequests(DEFAULT_AUTOANIMATOR_LIMITS.maxImageRequests);
+    setMaxCharsPerEpisode(DEFAULT_AUTOANIMATOR_LIMITS.maxCharsPerEpisode);
+    setMaxPanelsPerEpisode(DEFAULT_AUTOANIMATOR_LIMITS.maxPanelsPerEpisode);
+    setMaxEpisodeDurationMins(DEFAULT_AUTOANIMATOR_LIMITS.maxEpisodeDurationMins);
+    goToAgentWorkspace(selectedAgent, 'new');
   };
 
   const handleTreeItemClick = (item) => {
@@ -226,7 +350,7 @@ export default function Agents() {
       return;
     }
     try {
-      const res = await axios.get(`${API_BASE}/agents/narrative/checkpoints`, { params: { session_path: path } });
+      const res = await axios.get(`${API_BASE}/agents/autoanimator/checkpoints`, { params: { session_path: path } });
       setWorkflowHashes(res.data?.hashes || {});
       setWorkflowHistory(res.data?.history || {});
     } catch {
@@ -237,7 +361,14 @@ export default function Agents() {
 
   const applyTemplateSettings = (settings = {}) => {
     if (typeof settings?.prompt === 'string' && settings.prompt.trim()) setNarrativePrompt(settings.prompt);
+    if (typeof settings?.preset_prompt === 'string') setPresetPrompt(settings.preset_prompt);
+    // For new sessions, project name should be backend-driven or user-entered,
+    // not inherited from template defaults.
+    if (typeof settings?.theme === 'string' && settings.theme.trim()) setTheme(settings.theme);
     if (typeof settings?.preset === 'string' && settings.preset.trim()) setPreset(settings.preset);
+    if (typeof settings?.niche === 'string' && settings.niche.trim()) setNiche(settings.niche);
+    if (Array.isArray(settings?.planner_skill_ids)) setPlannerSkillIds(settings.planner_skill_ids.filter((v) => typeof v === 'string' && v.trim()));
+    if (typeof settings?.planner_skill_prompt === 'string') setPlannerSkillPrompt(settings.planner_skill_prompt);
     if (typeof settings?.format === 'string' && settings.format.trim()) setFormat(settings.format);
     if (typeof settings?.planner_model === 'string' && settings.planner_model.trim()) setPlannerModel(settings.planner_model);
     if (typeof settings?.character_image_model === 'string' && settings.character_image_model.trim()) setCharsModel(settings.character_image_model);
@@ -251,10 +382,22 @@ export default function Agents() {
     if (typeof settings?.subtitle_style === 'string' && settings.subtitle_style.trim()) setBuildpackSubtitleStyle(settings.subtitle_style);
     if (typeof settings?.subtitle_scale === 'number') setSubtitleScale(settings.subtitle_scale);
     if (typeof settings?.enable_music === 'boolean') setEnableMusic(settings.enable_music);
+    if (typeof settings?.create_banner === 'boolean') setCreateBanner(settings.create_banner);
     if (typeof settings?.music_provider === 'string' && settings.music_provider.trim()) setMusicProvider(settings.music_provider);
     if (typeof settings?.lyria_model === 'string' && settings.lyria_model.trim()) setLyriaModel(settings.lyria_model);
+    if (typeof settings?.tts_provider === 'string' && settings.tts_provider.trim()) setTtsProvider(settings.tts_provider);
+    if (typeof settings?.gemini_tts_model === 'string' && settings.gemini_tts_model.trim()) setGeminiTtsModel(settings.gemini_tts_model);
     if (typeof settings?.episodes_mode === 'string' && settings.episodes_mode.trim()) setEpisodesMode(settings.episodes_mode);
     if (typeof settings?.episode_mode === 'boolean') setEpisodeMode(settings.episode_mode);
+    if (typeof settings?.intro_only === 'boolean') setIntroOnly(settings.intro_only);
+    if (typeof settings?.start_frame_path === 'string') setStartFramePath(settings.start_frame_path);
+    if (typeof settings?.end_frame_path === 'string') setEndFramePath(settings.end_frame_path);
+    if (typeof settings?.pipeline_started_at === 'string' && settings.pipeline_started_at.trim() && sessionPath) {
+      setSessionPipelineStartTime(sessionPath, settings.pipeline_started_at);
+    }
+    if (typeof settings?.pipeline_finished_at === 'string' && settings.pipeline_finished_at.trim() && sessionPath) {
+      setSessionPipelineEndTime(sessionPath, settings.pipeline_finished_at);
+    }
 
     const resolution = Array.isArray(settings?.resolution) ? settings.resolution : [];
     if (resolution.length === 2) {
@@ -278,7 +421,7 @@ export default function Agents() {
     setHashRevertBusy(step);
     setBuildpackSaveMessage('');
     try {
-      const res = await axios.post(`${API_BASE}/agents/narrative/revert-hash`, {
+      const res = await axios.post(`${API_BASE}/agents/autoanimator/revert-hash`, {
         session_path: sessionPath,
         step,
         hash,
@@ -304,10 +447,16 @@ export default function Agents() {
 
   const buildSessionSettingsSnapshot = () => ({
     prompt: narrativePrompt,
+    preset_prompt: presetPrompt,
+    project_name: projectName,
     episodes_mode: episodesMode,
     episode: targetEpisode ? parseInt(targetEpisode, 10) : null,
-    theme: null,
+    theme,
     preset,
+    niche,
+    niche_context: selectedNicheDirectorContext || null,
+    planner_skill_ids: plannerSkillIds,
+    planner_skill_prompt: plannerSkillPrompt,
     format,
     planner_model: plannerModel,
     character_image_model: charsModel,
@@ -321,8 +470,11 @@ export default function Agents() {
     resolution: null,
     fps: null,
     enable_music: enableMusic,
+    create_banner: createBanner,
     music_provider: musicProvider,
     lyria_model: lyriaModel,
+    tts_provider: ttsProvider,
+    gemini_tts_model: geminiTtsModel,
     vector_upscale: false,
     max_image_requests: maxImageRequests,
     max_chars_per_episode: maxCharsPerEpisode,
@@ -332,9 +484,75 @@ export default function Agents() {
     font_style: buildpackFontStyle,
     subtitle_style: buildpackSubtitleStyle,
     narration_mode: buildpackCloudStyle === 'cloud-none' ? 'subtitles_only' : 'hybrid_subtitles_clouds',
+    subtitle_x: subtitleX,
+    subtitle_y: subtitleY,
     subtitle_scale: subtitleScale,
+    cloud_x: cloudX,
+    cloud_y: cloudY,
+    cloud_w: cloudW,
+    cloud_h: cloudH,
     episode_mode: episodeMode,
+    intro_only: introOnly,
+    start_frame_path: startFramePath || null,
+    end_frame_path: endFramePath || null,
   });
+
+  const ensureSessionForPlannerRun = async () => {
+    if (sessionPath) return sessionPath;
+    const normalizedProjectName = projectNameUserEdited ? (projectName || '').trim() : '';
+    const payload = normalizedProjectName ? { project_name: normalizedProjectName } : {};
+    const res = await axios.post(`${API_BASE}/agents/autoanimator/bootstrap-session`, payload);
+    const path = String(res.data?.session_path || '').trim();
+    if (!path) return '';
+
+    setSessionPath(path);
+    if (sessionMode !== 'existing') {
+      setSessionMode('existing');
+    }
+    setTreeRefreshToken((prev) => prev + 1);
+
+    const sid = String(res.data?.session_id || path.split('/')[0] || '');
+    if (sid) {
+      navigate(`/agents/${encodeURIComponent(selectedAgent)}/existing/${encodeURIComponent(sid)}`, { replace: true });
+    }
+    return path;
+  };
+
+  const uploadReferenceFramesIfNeeded = async (activeSessionPath) => {
+    let nextStart = startFramePath || '';
+    let nextEnd = endFramePath || '';
+
+    if (startFrameFile) {
+      const fd = new FormData();
+      fd.append('session_path', activeSessionPath);
+      fd.append('role', 'start');
+      fd.append('file', startFrameFile);
+      const up = await axios.post(`${API_BASE}/agents/autoanimator/upload-reference-frame`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      nextStart = String(up.data?.frame_path || '').trim();
+      setStartFramePath(nextStart);
+      setStartFrameFile(null);
+    }
+
+    if (endFrameFile) {
+      const fd = new FormData();
+      fd.append('session_path', activeSessionPath);
+      fd.append('role', 'end');
+      fd.append('file', endFrameFile);
+      const up = await axios.post(`${API_BASE}/agents/autoanimator/upload-reference-frame`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      nextEnd = String(up.data?.frame_path || '').trim();
+      setEndFramePath(nextEnd);
+      setEndFrameFile(null);
+    }
+
+    return {
+      startFramePath: nextStart || null,
+      endFramePath: nextEnd || null,
+    };
+  };
 
   const runNarrativeStep = async (step, opts = {}) => {
     const stepToSections = {
@@ -360,13 +578,39 @@ export default function Agents() {
 
     setStepBusy(step);
     setBuildpackSaveMessage('');
+    if (opts?.resetConsole) {
+      setLogs([]);
+    }
     try {
-      const isExisting = sessionMode === 'existing' || Boolean(sessionPath);
-      if (isExisting && sessionPath) {
+      const needsPlannerContext = step === 'all' || step === 'planner';
+      let activeSessionPath = sessionPath;
+      let activeSessionMode = sessionMode;
+
+      if (needsPlannerContext && !activeSessionPath) {
+        activeSessionPath = await ensureSessionForPlannerRun();
+        if (activeSessionPath) {
+          activeSessionMode = 'existing';
+        }
+      }
+
+      let uploadedRefs = {
+        startFramePath: startFramePath || null,
+        endFramePath: endFramePath || null,
+      };
+      if (needsPlannerContext && activeSessionPath) {
+        uploadedRefs = await uploadReferenceFramesIfNeeded(activeSessionPath);
+      }
+
+      const isExisting = activeSessionMode === 'existing' || Boolean(activeSessionPath);
+      if (isExisting && activeSessionPath) {
         try {
-          await axios.post(`${API_BASE}/agents/narrative/session-sync`, {
-            session_path: sessionPath,
-            settings: buildSessionSettingsSnapshot(),
+          await axios.post(`${API_BASE}/agents/autoanimator/session-sync`, {
+            session_path: activeSessionPath,
+            settings: {
+              ...buildSessionSettingsSnapshot(),
+              start_frame_path: uploadedRefs.startFramePath,
+              end_frame_path: uploadedRefs.endFramePath,
+            },
             locks: sectionLocks,
           });
         } catch {
@@ -375,20 +619,36 @@ export default function Agents() {
       }
       const effectiveEpisodesMode = isExisting ? episodesMode : 'new';
       const effectiveEpisodeMode = isExisting ? episodeMode : true;
+      const effectivePresetPrompt = (effectiveEpisodeMode && !String(presetPrompt || '').trim())
+        ? String(narrativePrompt || '').trim()
+        : presetPrompt;
+      if (effectivePresetPrompt && effectivePresetPrompt !== presetPrompt) {
+        setPresetPrompt(effectivePresetPrompt);
+      }
       const payload = {
         session_mode: isExisting ? 'existing' : 'new',
-        session_path: isExisting ? sessionPath : null,
+        session_path: isExisting ? activeSessionPath : null,
         step,
         reset: opts?.redo ? true : Boolean(stepReset[step]),
         redo: Boolean(opts?.redo),
         prompt: narrativePrompt,
+        preset_prompt: effectivePresetPrompt,
+        project_name: projectName,
+        niche,
+        planner_skill_ids: plannerSkillIds,
+        planner_skill_prompt: plannerSkillPrompt,
+        theme,
         episodes: effectiveEpisodesMode,
         episode: targetEpisode ? parseInt(targetEpisode, 10) : null,
         preset,
         format,
+        youtube_shorts_export: format === 'youtube_video_only' ? false : (format === 'youtube_widescreen' ? true : null),
         enable_music: enableMusic,
+        create_banner: createBanner,
         music_provider: musicProvider,
         lyria_model: lyriaModel,
+        tts_provider: ttsProvider,
+        gemini_tts_model: geminiTtsModel,
         narration_mode: buildpackCloudStyle === 'cloud-none' ? 'subtitles_only' : 'hybrid_subtitles_clouds',
         buildpack_resolution: buildpackResolution,
         cloud_style: buildpackCloudStyle,
@@ -396,6 +656,7 @@ export default function Agents() {
         subtitle_style: buildpackSubtitleStyle,
         subtitle_scale: subtitleScale,
         episode_mode: effectiveEpisodeMode,
+        intro_only: introOnly,
         planner_model: plannerModel,
         chars_model: charsModel,
         scenes_model: scenesModel,
@@ -409,13 +670,39 @@ export default function Agents() {
         max_chars_per_episode: maxCharsPerEpisode,
         max_panels_per_episode: maxPanelsPerEpisode,
         max_episode_duration_mins: maxEpisodeDurationMins,
+        start_frame_path: uploadedRefs.startFramePath,
+        end_frame_path: uploadedRefs.endFramePath,
       };
 
-      const start = await axios.post(`${API_BASE}/agents/narrative/run-step-live`, payload);
+      const start = await axios.post(`${API_BASE}/agents/autoanimator/run-step-live`, payload);
+
+      const startedSessionPath = start.data?.session_path;
+      if (startedSessionPath) {
+        if (startedSessionPath !== sessionPath) {
+          setSessionPath(startedSessionPath);
+        }
+        if (sessionMode !== 'existing') {
+          setSessionMode('existing');
+        }
+        if (opts?.pipelineStartedAt) {
+          setSessionPipelineStartTime(startedSessionPath, opts.pipelineStartedAt);
+        }
+        setTreeRefreshToken((prev) => prev + 1);
+        const sid = String(start.data?.session_id || startedSessionPath.split('/')[0] || '');
+        if (sid) {
+          navigate(`/agents/${encodeURIComponent(selectedAgent)}/existing/${encodeURIComponent(sid)}`, { replace: true });
+        }
+      }
 
       if (start.data?.done && start.data?.result) {
         const instant = start.data.result;
         const instantStatus = instant?.status || 'success';
+        if (startedSessionPath && instant?.pipeline_started_at) {
+          setSessionPipelineStartTime(startedSessionPath, instant.pipeline_started_at);
+        }
+        if (startedSessionPath && instant?.pipeline_finished_at) {
+          setSessionPipelineEndTime(startedSessionPath, instant.pipeline_finished_at);
+        }
         setLogs((prev) => [...prev, { type: instantStatus === 'error' ? 'error' : 'info', msg: instant?.reason || `Step '${step}' ${instantStatus}.` }]);
         if (instantStatus === 'error') {
           pushToast('error', `Step ${step} failed.`);
@@ -432,13 +719,14 @@ export default function Agents() {
       }
 
       setJobId(currentJobId);
+      localStorage.setItem(JOB_ID_STORAGE_KEY, currentJobId);
       setLogs((prev) => [...prev, { type: 'info', msg: `Step '${step}' started.` }]);
 
       let finalRes = null;
       for (;;) {
         // Poll final structured result while websocket streams console lines.
         await new Promise((resolve) => setTimeout(resolve, 500));
-        const statusRes = await axios.get(`${API_BASE}/agents/narrative/job/${currentJobId}`);
+        const statusRes = await axios.get(`${API_BASE}/agents/autoanimator/job/${currentJobId}`);
         if (statusRes.data?.done) {
           finalRes = statusRes.data?.result || {};
           break;
@@ -447,7 +735,13 @@ export default function Agents() {
 
       setJobId(null);
 
-      const nextPath = finalRes?.session_path || sessionPath;
+      const nextPath = finalRes?.session_path || startedSessionPath || sessionPath;
+      if (nextPath && finalRes?.pipeline_started_at) {
+        setSessionPipelineStartTime(nextPath, finalRes.pipeline_started_at);
+      }
+      if (nextPath && finalRes?.pipeline_finished_at) {
+        setSessionPipelineEndTime(nextPath, finalRes.pipeline_finished_at);
+      }
       if (nextPath && nextPath !== sessionPath) {
         setSessionPath(nextPath);
       }
@@ -481,6 +775,7 @@ export default function Agents() {
       pushToast('error', `Step ${step} failed.`);
     } finally {
       setJobId(null);
+      localStorage.removeItem(JOB_ID_STORAGE_KEY);
       setStepBusy('');
     }
   };
@@ -489,7 +784,7 @@ export default function Agents() {
     if (!sourceCharPath) return;
     try {
       const target = sessionPath || null;
-      const res = await axios.post(`${API_BASE}/agents/narrative/copy-character`, {
+      const res = await axios.post(`${API_BASE}/agents/autoanimator/copy-character`, {
         source_path: sourceCharPath,
         target_session_path: target,
       });
@@ -506,6 +801,18 @@ export default function Agents() {
     }
   };
 
+  const abortCurrentJob = async () => {
+    if (!jobId) return;
+    try {
+      await axios.post(`${API_BASE}/agents/autoanimator/job/${jobId}/abort`);
+      setLogs((prev) => [...prev, { type: 'system', msg: 'Abort requested. Waiting for worker shutdown...' }]);
+      pushToast('success', 'Abort requested.');
+    } catch (e) {
+      setLogs((prev) => [...prev, { type: 'error', msg: `Abort failed: ${e.message}` }]);
+      pushToast('error', 'Abort failed.');
+    }
+  };
+
   const redoSingleCharacter = async (item) => {
     if (!item?.name || !sessionPath) return;
     setCharRedoBusy(item.name);
@@ -513,7 +820,7 @@ export default function Agents() {
     setLogs((prev) => [...prev, { type: 'info', msg: `Single-char redo started: ${item.name}` }]);
     try {
       try {
-        await axios.post(`${API_BASE}/agents/narrative/session-sync`, {
+        await axios.post(`${API_BASE}/agents/autoanimator/session-sync`, {
           session_path: sessionPath,
           settings: buildSessionSettingsSnapshot(),
           locks: sectionLocks,
@@ -522,7 +829,7 @@ export default function Agents() {
         // Continue even if state sync fails.
       }
 
-      const res = await axios.post(`${API_BASE}/agents/narrative/redo-char`, {
+      const res = await axios.post(`${API_BASE}/agents/autoanimator/redo-char`, {
         session_path: sessionPath,
         char_name: item.name,
         visual_prompt: item.visual_prompt,
@@ -599,25 +906,107 @@ export default function Agents() {
   };
 
   useEffect(() => {
+    const restoreSavedJob = async () => {
+      const savedJobId = window.localStorage.getItem(JOB_ID_STORAGE_KEY);
+      if (!savedJobId || jobId) return;
+      try {
+        const statusRes = await axios.get(`${API_BASE}/agents/autoanimator/job/${savedJobId}`);
+        if (statusRes.data?.done) {
+          window.localStorage.removeItem(JOB_ID_STORAGE_KEY);
+          return;
+        }
+      } catch {
+        window.localStorage.removeItem(JOB_ID_STORAGE_KEY);
+        return;
+      }
+      setJobId(savedJobId);
+      setRunning(true);
+      setLogs((prev) => [...prev, { type: 'info', msg: `Restoring live log stream for job ${savedJobId} after reload.` }]);
+    };
+    restoreSavedJob();
+  }, []);
+
+  useEffect(() => {
+    if (page !== 'workspace' || sessionMode !== 'existing' || !sessionPath || jobId) return;
+    let cancelled = false;
+
+    const attachSessionJob = async () => {
+      try {
+        const res = await axios.get(`${API_BASE}/agents/autoanimator/session-active-job`, {
+          params: { session_path: sessionPath },
+        });
+        if (cancelled) return;
+        if (res.data?.found && res.data?.job_id) {
+          const activeJobId = String(res.data.job_id);
+          setJobId(activeJobId);
+          setRunning(true);
+          window.localStorage.setItem(JOB_ID_STORAGE_KEY, activeJobId);
+          setLogs((prev) => [...prev, { type: 'info', msg: `Reattached to active session job ${activeJobId}.` }]);
+        }
+      } catch {
+        // No active job for this session.
+      }
+    };
+
+    attachSessionJob();
+    return () => {
+      cancelled = true;
+    };
+  }, [page, sessionMode, sessionPath, jobId]);
+
+  useEffect(() => {
     if (!jobId) return;
 
+    wsIntentionalCloseRef.current = false;
     ws.current = new WebSocket(`${WS_BASE}/agents/stream/${jobId}`);
 
     ws.current.onmessage = (event) => {
       const data = JSON.parse(event.data);
       setLogs((prev) => [...prev, data]);
+      if (typeof data?.msg === 'string') {
+        if (data.msg.includes('New session directory:')) {
+          const marker = 'New session directory:';
+          const idx = data.msg.indexOf(marker);
+          const absPath = idx >= 0 ? data.msg.slice(idx + marker.length).trim() : '';
+          const outputsMarker = '/outputs/';
+          const outIdx = absPath.indexOf(outputsMarker);
+          if (outIdx >= 0) {
+            const rel = absPath.slice(outIdx + outputsMarker.length);
+            if (rel) {
+              setSessionPath(rel);
+              setTreeRefreshToken((prev) => prev + 1);
+            }
+          }
+        }
+        if (data.msg.includes("Step '") && data.msg.includes('finished with status')) {
+          setTreeRefreshToken((prev) => prev + 1);
+          const activePath = sessionPathRef.current;
+          if (activePath) refreshWorkflowHashes(activePath);
+        }
+      }
       if (data.type === 'success' || data.type === 'error') {
         setRunning(false);
       }
     };
 
     ws.current.onerror = () => {
-      setLogs((prev) => [...prev, { type: 'error', msg: 'WebSocket disconnected abnormally.' }]);
+      if (!wsIntentionalCloseRef.current) {
+        setLogs((prev) => [...prev, { type: 'error', msg: 'WebSocket disconnected abnormally.' }]);
+      }
       setRunning(false);
     };
 
+    ws.current.onclose = () => {
+      if (!wsIntentionalCloseRef.current) {
+        setLogs((prev) => [...prev, { type: 'info', msg: 'Live log stream closed.' }]);
+      }
+    };
+
     return () => {
-      if (ws.current) ws.current.close();
+      wsIntentionalCloseRef.current = true;
+      if (ws.current && ws.current.readyState < 2) {
+        ws.current.close();
+      }
     };
   }, [jobId]);
 
@@ -640,20 +1029,25 @@ export default function Agents() {
     }
 
     const normalizedMode = modeParam === 'existing' ? 'existing' : 'new';
-    const runtimeAgent = EXECUTION_AGENT_BY_UI_AGENT[agentId] || agentId;
     setPage('workspace');
     setSelectedAgent(agentId);
     setSessionMode(normalizedMode);
-    if (normalizedMode === 'existing' && sessionId) {
-      setSessionPath(`${sessionId}/${runtimeAgent}`);
-    } else {
-      setSessionPath('');
-    }
+    setSessionPath('');
+    setProjectName('');
+    setProjectNameUserEdited(false);
   }, [agentId, modeParam, sessionId]);
 
   useEffect(() => {
     setSelectedFile(null);
   }, [sessionMode, sessionPath]);
+
+  useEffect(() => {
+    if (!sessionPath) return;
+    // Reset local project-name ownership on session switch so backend state wins
+    // until user explicitly edits the field again.
+    setProjectName('');
+    setProjectNameUserEdited(false);
+  }, [sessionPath]);
 
   useEffect(() => {
     if (sessionPath) {
@@ -670,16 +1064,34 @@ export default function Agents() {
     const loadTemplateDefaultsForNewSession = async () => {
       if (page !== 'workspace' || sessionMode !== 'new' || sessionPath) return;
       try {
+        const templateRoot = await axios.get(`${API_BASE}/sessions/tree`, {
+          params: { path: AUTOANIMATOR_TEMPLATE_SESSION_ID },
+        });
+        const templateDir = (templateRoot.data || []).find((item) => item.is_dir && isAutoAnimatorSessionFolderName(item.name));
+        if (!templateDir?.path) {
+          return;
+        }
         const res = await axios.get(`${API_BASE}/sessions/file`, {
-          params: { path: `${AUTOANIMATOR_TEMPLATE_SESSION}/session_state.json` },
+          params: { path: `${templateDir.path}/session_state.json` },
         });
         const raw = res.data?.content || '{}';
         const parsed = JSON.parse(raw);
         const settings = parsed?.settings || {};
         applyTemplateSettings(settings);
+        setFormat('youtube_widescreen');
+        // New sessions default to LLM auto-selection for aesthetics.
+        setTheme('auto-select');
+        setPreset('auto-select');
+        setNiche('auto-select');
+        setIntroOnly(true);
         setSectionLocks({ ...DEFAULT_SECTION_LOCKS });
       } catch {
         // Keep built-in defaults if template session is unavailable.
+        setFormat('youtube_widescreen');
+        setTheme('auto-select');
+        setPreset('auto-select');
+        setNiche('auto-select');
+        setIntroOnly(true);
       }
     };
     loadTemplateDefaultsForNewSession();
@@ -715,12 +1127,60 @@ export default function Agents() {
         const raw = res.data?.content || '{}';
         const parsed = JSON.parse(raw);
         const settings = parsed?.settings || {};
-        const savedPrompt = settings?.prompt;
-        if (typeof savedPrompt === 'string' && savedPrompt.trim()) {
-          setNarrativePrompt(savedPrompt);
+        const savedPrompt = typeof settings?.prompt === 'string' ? settings.prompt : '';
+        const savedPresetPrompt = settings?.preset_prompt;
+
+        const isEpisodeMode = settings?.episode_mode === true;
+        const presetFromState = typeof savedPresetPrompt === 'string' ? savedPresetPrompt : '';
+        const hasPreset = presetFromState.trim().length > 0;
+        const hasSavedPrompt = savedPrompt.trim().length > 0;
+
+        if (isEpisodeMode) {
+          if (hasPreset) {
+            setPresetPrompt(presetFromState);
+            setNarrativePrompt(hasSavedPrompt ? savedPrompt : '');
+          } else if (hasSavedPrompt) {
+            // Legacy-session upgrade: first narrative prompt becomes preset prompt as-is.
+            setPresetPrompt(savedPrompt);
+            setNarrativePrompt(savedPrompt);
+            try {
+              await axios.post(`${API_BASE}/agents/autoanimator/session-sync`, {
+                session_path: sessionPath,
+                settings: {
+                  prompt: savedPrompt,
+                  preset_prompt: savedPrompt,
+                },
+                locks: {},
+              });
+            } catch {
+              // Non-blocking; local state is still updated.
+            }
+          } else {
+            setPresetPrompt('');
+            setNarrativePrompt('');
+          }
+        } else {
+          if (hasSavedPrompt) {
+            setNarrativePrompt(savedPrompt);
+          }
+          if (typeof savedPresetPrompt === 'string') {
+            setPresetPrompt(savedPresetPrompt);
+          }
+        }
+        if (typeof settings?.project_name === 'string') {
+          const backendProjectName = settings.project_name.trim();
+          if (backendProjectName && !projectNameUserEdited) {
+            setProjectName(backendProjectName);
+          }
         }
 
         if (typeof settings?.preset === 'string' && settings.preset.trim()) setPreset(settings.preset);
+        if (typeof settings?.theme === 'string' && settings.theme.trim()) setTheme(settings.theme);
+        if (typeof settings?.niche === 'string' && settings.niche.trim()) setNiche(settings.niche);
+        if (Array.isArray(settings?.planner_skill_ids)) setPlannerSkillIds(settings.planner_skill_ids.filter((v) => typeof v === 'string' && v.trim()));
+        else setPlannerSkillIds([]);
+        if (typeof settings?.planner_skill_prompt === 'string') setPlannerSkillPrompt(settings.planner_skill_prompt);
+        else setPlannerSkillPrompt('');
         if (typeof settings?.planner_model === 'string' && settings.planner_model.trim()) setPlannerModel(settings.planner_model);
         if (typeof settings?.character_image_model === 'string' && settings.character_image_model.trim()) setCharsModel(settings.character_image_model);
         if (typeof settings?.scene_image_model === 'string' && settings.scene_image_model.trim()) setScenesModel(settings.scene_image_model);
@@ -729,34 +1189,56 @@ export default function Agents() {
         if (typeof settings?.max_panels_per_episode === 'number') setMaxPanelsPerEpisode(settings.max_panels_per_episode);
         if (typeof settings?.max_episode_duration_mins === 'number') setMaxEpisodeDurationMins(settings.max_episode_duration_mins);
         if (typeof settings?.enable_music === 'boolean') setEnableMusic(settings.enable_music);
+        if (typeof settings?.create_banner === 'boolean') setCreateBanner(settings.create_banner);
         if (typeof settings?.music_provider === 'string' && settings.music_provider.trim()) setMusicProvider(settings.music_provider);
         if (typeof settings?.lyria_model === 'string' && settings.lyria_model.trim()) setLyriaModel(settings.lyria_model);
+        if (typeof settings?.tts_provider === 'string' && settings.tts_provider.trim()) setTtsProvider(settings.tts_provider);
+        if (typeof settings?.gemini_tts_model === 'string' && settings.gemini_tts_model.trim()) setGeminiTtsModel(settings.gemini_tts_model);
         if (typeof settings?.cloud_style === 'string' && settings.cloud_style.trim()) setBuildpackCloudStyle(settings.cloud_style);
         if (typeof settings?.font_style === 'string' && settings.font_style.trim()) setBuildpackFontStyle(settings.font_style);
         if (typeof settings?.subtitle_style === 'string' && settings.subtitle_style.trim()) setBuildpackSubtitleStyle(settings.subtitle_style);
+        if (typeof settings?.subtitle_x === 'number') setSubtitleX(settings.subtitle_x);
+        if (typeof settings?.subtitle_y === 'number') setSubtitleY(settings.subtitle_y);
         if (typeof settings?.subtitle_scale === 'number') setSubtitleScale(settings.subtitle_scale);
+        if (typeof settings?.cloud_x === 'number') setCloudX(settings.cloud_x);
+        if (typeof settings?.cloud_y === 'number') setCloudY(settings.cloud_y);
+        if (typeof settings?.cloud_w === 'number') setCloudW(settings.cloud_w);
+        if (typeof settings?.cloud_h === 'number') setCloudH(settings.cloud_h);
         if (typeof settings?.episodes_mode === 'string' && settings.episodes_mode.trim()) setEpisodesMode(settings.episodes_mode);
         if (typeof settings?.episode_mode === 'boolean') setEpisodeMode(settings.episode_mode);
+        if (typeof settings?.intro_only === 'boolean') setIntroOnly(settings.intro_only);
         if (typeof settings?.episode === 'number') setTargetEpisode(String(settings.episode));
+        if (typeof settings?.start_frame_path === 'string') setStartFramePath(settings.start_frame_path);
+        if (typeof settings?.end_frame_path === 'string') setEndFramePath(settings.end_frame_path);
+        if (typeof settings?.pipeline_started_at === 'string' && settings.pipeline_started_at.trim()) {
+          setSessionPipelineStartTime(sessionPath, settings.pipeline_started_at);
+        }
+        if (typeof settings?.pipeline_finished_at === 'string' && settings.pipeline_finished_at.trim()) {
+          setSessionPipelineEndTime(sessionPath, settings.pipeline_finished_at);
+        }
       } catch {
         // Keep current prompt when there is no stored session prompt.
       }
     };
     loadSavedPrompt();
-  }, [sessionMode, sessionPath]);
+  }, [sessionMode, sessionPath, projectNameUserEdited]);
 
   useEffect(() => {
     const loadPlannerCharPrompts = async () => {
       if (page !== 'workspace' || !sessionPath) {
         setCharPromptItems([]);
+        setObjectPromptItems([]);
         return;
       }
       try {
-        const res = await axios.get(`${API_BASE}/agents/narrative/char-prompts`, { params: { session_path: sessionPath } });
+        const res = await axios.get(`${API_BASE}/agents/autoanimator/char-prompts`, { params: { session_path: sessionPath } });
         const rows = Array.isArray(res.data?.char_prompts) ? res.data.char_prompts : [];
         setCharPromptItems(rows.map((r) => ({ name: r.name, visual_prompt: r.visual_prompt || '' })));
+        const objRows = Array.isArray(res.data?.object_prompts) ? res.data.object_prompts : [];
+        setObjectPromptItems(objRows.map((r) => ({ name: r.name, visual_prompt: r.visual_prompt || '', object_type: r.object_type || 'prop' })));
       } catch {
         setCharPromptItems([]);
+        setObjectPromptItems([]);
       }
     };
 
@@ -767,15 +1249,18 @@ export default function Agents() {
     if (sessionMode !== 'existing') {
       setEpisodesMode('new');
       setEpisodeMode(true);
+      setIntroOnly(true);
       setTargetEpisode('');
+      return;
     }
+    setEpisodesMode((prev) => (prev === 'new' ? 'continue' : prev));
   }, [sessionMode]);
 
   useEffect(() => {
     const loadLocks = async () => {
       if (!sessionPath) return;
       try {
-        const res = await axios.get(`${API_BASE}/agents/narrative/locks`, { params: { session_path: sessionPath } });
+        const res = await axios.get(`${API_BASE}/agents/autoanimator/locks`, { params: { session_path: sessionPath } });
         const incoming = res.data?.locks || {};
         setSectionLocks((prev) => ({ ...DEFAULT_SECTION_LOCKS, ...prev, ...incoming }));
       } catch {
@@ -790,7 +1275,7 @@ export default function Agents() {
     setSectionLocks(next);
     if (!sessionPath) return;
     try {
-      await axios.post(`${API_BASE}/agents/narrative/session-sync`, {
+      await axios.post(`${API_BASE}/agents/autoanimator/session-sync`, {
         session_path: sessionPath,
         settings: buildSessionSettingsSnapshot(),
         locks: next,
@@ -802,16 +1287,17 @@ export default function Agents() {
   };
 
   useEffect(() => {
-    if (!running || page !== 'workspace' || sessionMode !== 'existing' || !sessionPath) {
+    if (page !== 'workspace' || sessionMode !== 'existing' || !sessionPath) {
       return;
     }
 
     const intervalId = setInterval(() => {
       setTreeRefreshToken((prev) => prev + 1);
-    }, 3000);
+      refreshWorkflowHashes(sessionPath);
+    }, 30000);
 
     return () => clearInterval(intervalId);
-  }, [running, page, sessionMode, sessionPath]);
+  }, [page, sessionMode, sessionPath]);
 
   useEffect(() => {
     const loadSessions = async () => {
@@ -823,8 +1309,7 @@ export default function Agents() {
         for (const r of roots) {
           try {
             const sub = await axios.get(`${API_BASE}/sessions/tree`, { params: { path: r.path } });
-            const runtimeAgent = EXECUTION_AGENT_BY_UI_AGENT[selectedAgent] || selectedAgent;
-            const match = sub.data.find((item) => item.is_dir && item.name === runtimeAgent);
+            const match = (sub.data || []).find((item) => item.is_dir && isAutoAnimatorSessionFolderName(item.name));
             if (match) {
               sessionOptions.push(match.path);
             }
@@ -835,13 +1320,18 @@ export default function Agents() {
 
         setAvailableSessions(sessionOptions);
         if (sessionMode === 'existing') {
-          const runtimeAgent = EXECUTION_AGENT_BY_UI_AGENT[selectedAgent] || selectedAgent;
-          const urlDerivedPath = sessionId ? `${sessionId}/${runtimeAgent}` : '';
-          const nextPath = sessionOptions.includes(urlDerivedPath)
+          const urlDerivedPath = sessionId
+            ? (sessionOptions.find((p) => String(p).startsWith(`${sessionId}/`)) || '')
+            : '';
+          const currentPath = String(sessionPath || '');
+          // Do not snap back to an older session while a new one is being initialized.
+          const nextPath = currentPath || (sessionOptions.includes(urlDerivedPath)
             ? urlDerivedPath
-            : (sessionOptions[0] || '');
+            : (sessionOptions[0] || ''));
 
-          setSessionPath(nextPath);
+          if (nextPath && nextPath !== sessionPath) {
+            setSessionPath(nextPath);
+          }
 
           if (nextPath) {
             const nextSessionId = nextPath.split('/')[0];
@@ -858,7 +1348,7 @@ export default function Agents() {
     if (page === 'workspace') {
       loadSessions();
     }
-  }, [navigate, page, selectedAgent, sessionId, sessionMode]);
+  }, [navigate, page, selectedAgent, sessionId, sessionMode, sessionPath]);
 
   useEffect(() => {
     const loadLibraryOptions = async () => {
@@ -913,9 +1403,47 @@ export default function Agents() {
   }, [page]);
 
   useEffect(() => {
+    const loadPlannerOptions = async () => {
+      try {
+        const res = await axios.get(`${API_BASE}/agents/autoanimator/planner-options`);
+        const themes = res.data?.themes || {};
+        const styles = res.data?.art_styles || {};
+        const niches = res.data?.niches || {};
+        const skills = res.data?.planner_skills || {};
+        const defaults = res.data?.defaults || {};
+        setPlannerThemes(themes);
+        setPlannerArtStyles(styles);
+        setPlannerNiches(niches);
+        setPlannerSkillsCatalog(skills);
+        if (sessionMode === 'new') {
+          if (typeof defaults?.max_image_requests === 'number') setMaxImageRequests(defaults.max_image_requests);
+          if (typeof defaults?.max_chars_per_episode === 'number') setMaxCharsPerEpisode(defaults.max_chars_per_episode);
+          if (typeof defaults?.max_panels_per_episode === 'number') setMaxPanelsPerEpisode(defaults.max_panels_per_episode);
+          if (typeof defaults?.max_episode_duration_mins === 'number') setMaxEpisodeDurationMins(defaults.max_episode_duration_mins);
+          if (typeof defaults?.niche === 'string' && defaults.niche.trim()) setNiche(defaults.niche);
+          if (Array.isArray(defaults?.planner_skill_ids)) {
+            setPlannerSkillIds(defaults.planner_skill_ids.filter((v) => typeof v === 'string' && v.trim()));
+          }
+        }
+        if (typeof defaults?.tts_provider === 'string' && defaults.tts_provider.trim()) setTtsProvider(defaults.tts_provider);
+        if (typeof defaults?.gemini_tts_model === 'string' && defaults.gemini_tts_model.trim()) setGeminiTtsModel(defaults.gemini_tts_model);
+      } catch {
+        setPlannerThemes({});
+        setPlannerArtStyles({});
+        setPlannerNiches({});
+        setPlannerSkillsCatalog({});
+      }
+    };
+
+    if (page === 'workspace') {
+      loadPlannerOptions();
+    }
+  }, [page, sessionMode]);
+
+  useEffect(() => {
     const loadGoogleModels = async () => {
       try {
-        const res = await axios.get(`${API_BASE}/agents/narrative/google-models`);
+        const res = await axios.get(`${API_BASE}/agents/autoanimator/google-models`);
         const byTask = res.data?.by_task || {};
         const defaults = res.data?.defaults || {};
         setAvailableModelsByTask({
@@ -1084,10 +1612,17 @@ export default function Agents() {
   };
 
   useEffect(() => {
+    if (!reuseSessionChars) return;
     if (!sourceCharSession && sourceCharSessions.length > 0) {
       setSourceCharSession(sourceCharSessions[0]);
     }
-  }, [sourceCharSession, sourceCharSessions]);
+  }, [reuseSessionChars, sourceCharSession, sourceCharSessions]);
+
+  useEffect(() => {
+    if (reuseSessionChars) return;
+    setSourceCharPath('');
+    setSourceCharSession('');
+  }, [reuseSessionChars]);
 
   useEffect(() => {
     if (!characterPackId) return;
@@ -1119,9 +1654,22 @@ export default function Agents() {
     );
   }
 
+  if (selectedAgent === 'ova') {
+    return (
+      <OvaWorkspace
+        onBack={() => {
+          setPage('selector');
+          setSessionMode('new');
+          setSessionPath('');
+          navigate('/agents');
+        }}
+      />
+    );
+  }
+
   return (
-    <div style={{ display: 'flex', gap: '1rem', height: '100%', position: 'relative' }}>
-      <div style={{ position: 'fixed', top: 18, right: 22, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div className="agents-layout" style={{ display: 'flex', gap: '1rem', height: '100%', position: 'relative' }}>
+      <div className="agents-toast-stack" style={{ position: 'fixed', top: 18, right: 22, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {toasts.map((t) => (
           <div
             key={t.id}
@@ -1141,19 +1689,24 @@ export default function Agents() {
           </div>
         ))}
       </div>
-      <aside className="glass-panel" style={{ width: 390, display: 'flex', flexDirection: 'column' }}>
-        <section style={{ padding: '1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <aside className="glass-panel agents-sidebar" style={{ width: 390, display: 'flex', flexDirection: 'column' }}>
+        <section className="agents-sidebar-header" style={{ padding: '1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="agents-sidebar-title-wrap">
+            <h2 className="agents-sidebar-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Play size={20} className="text-accent" /> {AGENTS_LIST.find((a) => a.id === selectedAgent)?.name}
             </h2>
-            <p style={{ marginTop: '0.45rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+            <p className="agents-sidebar-subtitle" style={{ marginTop: '0.45rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
               Preview-first configuration for higher quality narration and character consistency.
             </p>
           </div>
-          <button className="btn" onClick={() => navigate('/agents')} style={{ height: '2rem' }}>
-            Back
-          </button>
+          <div className="agents-sidebar-actions" style={{ display: 'flex', gap: '0.5rem' }}>
+            <button className="btn agents-action-btn" type="button" onClick={startNewSessionFromWorkspace} style={{ height: '2rem' }}>
+              Start New Session
+            </button>
+            <button className="btn agents-action-btn" type="button" onClick={goBackToAgentSelector} style={{ height: '2rem' }}>
+              Back
+            </button>
+          </div>
         </section>
 
         <section style={{ padding: '1rem', overflowY: 'auto', flex: 1 }}>
@@ -1334,14 +1887,93 @@ export default function Agents() {
             </summary>
             <fieldset disabled={sectionLocks.planner} style={{ border: 'none', padding: 0, margin: 0 }}>
             <div className="config-control">
-              <label>Narrative Prompt</label>
-              <textarea rows={6} value={narrativePrompt} onChange={(e) => setNarrativePrompt(e.target.value)} style={{ width: '100%', resize: 'vertical' }} />
+              <label>Project Name</label>
+              <input
+                type="text"
+                value={projectName}
+                onChange={(e) => {
+                  setProjectNameUserEdited(true);
+                  setProjectName(e.target.value);
+                }}
+                placeholder="Leave blank to let backend assign"
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div className="config-control" style={{ marginTop: '0.55rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>Preset Prompt (series source-of-truth)</span>
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSectionLock('preset_prompt'); }}
+                  style={{ padding: '0.2rem 0.35rem' }}
+                >
+                  {sectionLocks.preset_prompt ? <Lock size={14} /> : <Unlock size={14} />}
+                </button>
+              </label>
+              <textarea
+                className="planner-prompt-textarea"
+                rows={5}
+                wrap="soft"
+                value={presetPrompt}
+                onChange={(e) => setPresetPrompt(e.target.value)}
+                disabled={sectionLocks.preset_prompt}
+                style={{ width: '100%', resize: 'vertical', maxWidth: '100%' }}
+              />
+            </div>
+            <div className="config-control" style={{ marginTop: '0.55rem' }}>
+              <label>Narrative Prompt (episode add-on)</label>
+              <textarea
+                className="planner-prompt-textarea"
+                rows={6}
+                wrap="soft"
+                value={narrativePrompt}
+                onChange={(e) => setNarrativePrompt(e.target.value)}
+                placeholder="Optional for continue mode when preset prompt is already set."
+                style={{ width: '100%', resize: 'vertical', maxWidth: '100%' }}
+              />
+            </div>
+            <div className="config-grid" style={{ marginTop: '0.65rem' }}>
+              <div className="config-control">
+                <label>Start Frame (optional)</label>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(e) => {
+                    const f = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                    setStartFrameFile(f);
+                    if (f) setStartFramePath('');
+                  }}
+                />
+                {(startFramePath || startFrameFile) && (
+                  <div style={{ marginTop: '0.25rem', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                    {startFramePath ? `Saved: ${startFramePath}` : `Pending upload: ${startFrameFile?.name || ''}`}
+                  </div>
+                )}
+              </div>
+              <div className="config-control">
+                <label>End Frame (optional)</label>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(e) => {
+                    const f = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                    setEndFrameFile(f);
+                    if (f) setEndFramePath('');
+                  }}
+                />
+                {(endFramePath || endFrameFile) && (
+                  <div style={{ marginTop: '0.25rem', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                    {endFramePath ? `Saved: ${endFramePath}` : `Pending upload: ${endFrameFile?.name || ''}`}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="config-grid" style={{ marginTop: '0.65rem' }}>
               <div className="config-control">
                 <label>Episodes</label>
                 {sessionMode === 'existing' ? (
-                  <select value={episodesMode} onChange={(e) => setEpisodesMode(e.target.value)} disabled>
+                  <select value={episodesMode} onChange={(e) => setEpisodesMode(e.target.value)}>
                     <option value="new">new</option>
                     <option value="continue">continue</option>
                   </select>
@@ -1351,7 +1983,7 @@ export default function Agents() {
               </div>
               <div className="config-control">
                 <label>Episode Number (optional)</label>
-                <input value={targetEpisode} onChange={(e) => setTargetEpisode(e.target.value)} placeholder="e.g. 2" disabled />
+                <input value={targetEpisode} onChange={(e) => setTargetEpisode(e.target.value)} placeholder="e.g. 2" />
               </div>
             </div>
             <div className="config-control" style={{ marginTop: '0.65rem' }}>
@@ -1363,21 +1995,117 @@ export default function Agents() {
                 </span>
               </label>
             </div>
+            <div className="config-control" style={{ marginTop: '0.55rem' }}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={introOnly}
+                  onChange={(e) => setIntroOnly(e.target.checked)}
+                />
+                <span style={{ marginLeft: 6 }}>
+                  Intro Only Mode (new sessions default ON)
+                </span>
+              </label>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                When enabled, planner emphasizes intro/setup-focused episode structure.
+              </div>
+            </div>
             <div className="config-grid" style={{ marginTop: '0.65rem' }}>
+              <div className="config-control">
+                <label>Theme</label>
+                <select value={theme} onChange={(e) => setTheme(e.target.value)} disabled={sessionMode === 'existing'}>
+                  <option value="auto-select">Auto-select (LLM)</option>
+                  {Object.entries(plannerThemes).map(([key, text]) => (
+                    <option key={key} value={key}>{key} - {String(text).slice(0, 44)}</option>
+                  ))}
+                </select>
+              </div>
               <div className="config-control">
                 <label>Art Style</label>
                 <select value={preset} onChange={(e) => setPreset(e.target.value)} disabled={sessionMode === 'existing'}>
-                  <option value="cinematic_anime">Cinematic Anime</option>
-                  <option value="noir_comic">Noir Comic</option>
-                  <option value="sci_fi_neon">Sci-Fi Neon</option>
-                  <option value="horror_manga">Horror Manga</option>
-                  <option value="magic_illusion_stage">Magic Illusion Stage</option>
-                  <option value="comedy_cartoon">Comedy Cartoon</option>
-                  <option value="ghibli_watercolor">Ghibli Watercolor</option>
-                  <option value="retro_pop_comic">Retro Pop Comic</option>
-                  <option value="space_opera_cinematic">Space Opera Cinematic</option>
+                  <option value="auto-select">Auto-select (LLM)</option>
+                  {Object.entries(plannerArtStyles).map(([key]) => (
+                    <option key={key} value={key}>{key}</option>
+                  ))}
                 </select>
               </div>
+              <div className="config-control">
+                <label>Niche Bundle</label>
+                <select value={niche} onChange={(e) => setNiche(e.target.value)}>
+                  <option value="auto-select">Auto-select (general)</option>
+                  {Object.entries(plannerNiches).map(([key, cfg]) => (
+                    <option key={key} value={key}>{cfg?.label || key}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="config-control" style={{ marginTop: '0.65rem' }}>
+              <label>Director Context Prompt (from selected niche)</label>
+              <textarea
+                className="planner-prompt-textarea"
+                rows={4}
+                wrap="soft"
+                value={
+                  niche === 'auto-select'
+                    ? 'Auto-select is enabled. Director context will be chosen from the selected niche at runtime.'
+                    : (selectedNicheDirectorContext || 'No director_context defined for this niche in config.')
+                }
+                readOnly
+                style={{ width: '100%', resize: 'vertical', maxWidth: '100%', opacity: 0.9 }}
+              />
+            </div>
+            <div className="config-control" style={{ marginTop: '0.65rem' }}>
+              <label>Optional Planner Skills</label>
+              {Object.entries(plannerSkillsCatalog).length === 0 ? (
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                  No predefined planner skills found in config.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                  {Object.entries(plannerSkillsCatalog).map(([skillId, skillCfg]) => {
+                    const checked = plannerSkillIds.includes(skillId);
+                    const label = String(skillCfg?.label || skillId);
+                    const description = String(skillCfg?.description || '');
+                    return (
+                      <label key={skillId} style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            setPlannerSkillIds((prev) => {
+                              const next = new Set(prev);
+                              if (e.target.checked) next.add(skillId);
+                              else next.delete(skillId);
+                              return Array.from(next);
+                            });
+                          }}
+                        />
+                        <span>
+                          <strong>{label}</strong>
+                          {description ? <span style={{ color: 'var(--text-muted)' }}> - {description}</span> : null}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="config-control" style={{ marginTop: '0.55rem' }}>
+              <label>Custom Planner Skill Prompt (optional)</label>
+              <textarea
+                className="planner-prompt-textarea"
+                rows={4}
+                wrap="soft"
+                value={plannerSkillPrompt}
+                onChange={(e) => setPlannerSkillPrompt(e.target.value)}
+                placeholder="Example: Enforce scientifically plausible object behavior and engineering constraints for every invention panel."
+                style={{ width: '100%', resize: 'vertical', maxWidth: '100%' }}
+              />
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                These optional skills are injected into planner/director prompts and carried into scene generation guidance.
+              </div>
+            </div>
+            <div className="config-grid" style={{ marginTop: '0.65rem' }}>
               <div className="config-control">
                 <label>Planner Model</label>
                 <select value={plannerModel} onChange={(e) => setPlannerModel(e.target.value)} disabled={sessionMode === 'existing'}>
@@ -1476,6 +2204,30 @@ export default function Agents() {
                 </div>
               )}
             </div>
+            {objectPromptItems.length > 0 && (
+              <div className="config-control" style={{ marginBottom: '0.6rem' }}>
+                <label>Planner Object Prompts ({objectPromptItems.length})</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                  {objectPromptItems.map((item, idx) => (
+                    <div key={`${item.name}-obj-${idx}`}>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginBottom: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <span>🔧 {item.name}</span>
+                        <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>[{item.object_type}]</span>
+                      </div>
+                      <textarea
+                        rows={5}
+                        value={item.visual_prompt}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setObjectPromptItems((prev) => prev.map((p, pidx) => (pidx === idx ? { ...p, visual_prompt: value } : p)));
+                        }}
+                        style={{ width: '100%', resize: 'vertical', minHeight: 130 }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {sessionMode === 'existing' ? (
               <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                 Character source is controlled by files from selected session.
@@ -1491,28 +2243,42 @@ export default function Agents() {
                     ))}
                   </select>
                 </div>
-                <div className="config-grid" style={{ marginTop: '0.65rem' }}>
-                  <div className="config-control">
-                    <label>Source Session</label>
-                    <select value={sourceCharSession} onChange={(e) => setSourceCharSession(e.target.value)}>
-                      {sourceCharSessions.map((sid) => (
-                        <option key={sid} value={sid}>{sid}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="config-control">
-                    <label>Source Character</label>
-                    <select value={sourceCharPath} onChange={(e) => setSourceCharPath(e.target.value)}>
-                      <option value="">Select character file</option>
-                      {filteredSourceChars.map((c) => (
-                        <option key={c.path} value={c.path}>{c.name}</option>
-                      ))}
-                    </select>
-                  </div>
+                <div className="config-control" style={{ marginTop: '0.65rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input
+                      type="checkbox"
+                      checked={reuseSessionChars}
+                      onChange={(e) => setReuseSessionChars(e.target.checked)}
+                    />
+                    Import Characters (optional)
+                  </label>
                 </div>
-                <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <button className="btn" type="button" onClick={copyCharacterToSession} disabled={!sourceCharPath}>Copy Character To Session</button>
-                </div>
+                {reuseSessionChars && (
+                  <>
+                    <div className="config-grid" style={{ marginTop: '0.65rem' }}>
+                      <div className="config-control">
+                        <label>Source Session</label>
+                        <select value={sourceCharSession} onChange={(e) => setSourceCharSession(e.target.value)}>
+                          {sourceCharSessions.map((sid) => (
+                            <option key={sid} value={sid}>{sid}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="config-control">
+                        <label>Source Character</label>
+                        <select value={sourceCharPath} onChange={(e) => setSourceCharPath(e.target.value)}>
+                          <option value="">Select character file</option>
+                          {filteredSourceChars.map((c) => (
+                            <option key={c.path} value={c.path}>{c.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <button className="btn" type="button" onClick={copyCharacterToSession} disabled={!sourceCharPath}>Copy Character To Session</button>
+                    </div>
+                  </>
+                )}
               </>
             )}
             <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -1523,6 +2289,15 @@ export default function Agents() {
               <button className="btn" type="button" title="Redo Chars" onClick={() => runNarrativeStep('chars', { redo: true })} disabled={stepBusy === 'chars' || stepBusy === 'all'}><RotateCcw size={14} /></button>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>hash: {workflowHashes.chars || 'n/a'}</span>
               {renderHashHistoryControls('chars')}
+            </div>
+            <div className="config-control" style={{ marginTop: '0.65rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input type="checkbox" checked={createBanner} onChange={(e) => setCreateBanner(e.target.checked)} />
+                <span>Create Show Banner</span>
+              </label>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                Generates a wide panoramic title-card after character generation and uses it as the series first-frame anchor.
+              </div>
             </div>
             </fieldset>
           </details>
@@ -1568,6 +2343,22 @@ export default function Agents() {
               </button>
             </summary>
             <fieldset disabled={sectionLocks.audio} style={{ border: 'none', padding: 0, margin: 0 }}>
+            <div className="config-control" style={{ marginTop: '0.5rem' }}>
+              <label>TTS Provider</label>
+              <select value={ttsProvider} onChange={(e) => setTtsProvider(e.target.value)}>
+                <option value="edge">Edge TTS (default)</option>
+                <option value="gemini">Google Gemini TTS</option>
+              </select>
+            </div>
+            {ttsProvider === 'gemini' && (
+              <div className="config-control" style={{ marginTop: '0.5rem' }}>
+                <label>Gemini TTS Model</label>
+                <select value={geminiTtsModel} onChange={(e) => setGeminiTtsModel(e.target.value)}>
+                  <option value="models/gemini-2.5-flash-tts">Gemini 2.5 Flash TTS</option>
+                  <option value="models/gemini-2.5-pro-tts">Gemini 2.5 Pro TTS</option>
+                </select>
+              </div>
+            )}
             <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <input type="checkbox" checked={stepReset.audio} onChange={(e) => setStepReset((s) => ({ ...s, audio: e.target.checked }))} /> reset
@@ -1701,7 +2492,8 @@ export default function Agents() {
                 <option value="tiktok">TikTok</option>
                 <option value="instagram_reels">Instagram Reels</option>
                 <option value="youtube_shorts">YouTube Shorts</option>
-                <option value="youtube_widescreen">YouTube Widescreen</option>
+                <option value="youtube_video_only">YouTube Video Only (16:9)</option>
+                <option value="youtube_widescreen">YouTube Video (16:9 + Shorts export)</option>
               </select>
             </div>
             <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -2069,7 +2861,20 @@ export default function Agents() {
                     textShadow: '2px 2px 10px rgba(0,0,0,0.5)',
                   }}
                 >
-                  {narrativePrompt || 'Enter narrative prompt to preview on canvas.'}
+                  <div className="display-prompt-text" style={{ maxWidth: '92%', textAlign: 'left' }}>
+                    {presetPrompt?.trim() ? (
+                      <>
+                        <div style={{ fontSize: '0.9rem', opacity: 0.86, marginBottom: '0.35rem' }}>Preset Prompt (Series Base)</div>
+                        <div style={{ whiteSpace: 'pre-wrap' }}>{presetPrompt}</div>
+                        <div style={{ marginTop: '0.9rem', fontSize: '0.9rem', opacity: 0.86, marginBottom: '0.35rem' }}>Narrative Add-on</div>
+                        <div style={{ whiteSpace: 'pre-wrap' }}>
+                          {narrativePrompt || 'No episode add-on provided.'}
+                        </div>
+                      </>
+                    ) : (
+                      narrativePrompt || 'Enter narrative prompt to preview on canvas.'
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -2081,9 +2886,19 @@ export default function Agents() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
               <SquareTerminal size={16} /> Console Output
               {jobId && <span style={{ marginLeft: '8px', color: 'var(--text-accent)' }}>Job ID: {jobId}</span>}
+              {sessionPath && pipelineStartBySession[sessionPath] && (
+                <span style={{ marginLeft: '8px', color: 'var(--text-accent)' }}>
+                  Pipeline Start: {new Date(pipelineStartBySession[sessionPath]).toLocaleString()}
+                </span>
+              )}
+              {sessionPath && pipelineEndBySession[sessionPath] && (
+                <span style={{ marginLeft: '8px', color: 'var(--text-accent)' }}>
+                  Pipeline End: {new Date(pipelineEndBySession[sessionPath]).toLocaleString()}
+                </span>
+              )}
             </div>
             {running && (
-              <button className="btn" style={{ color: 'var(--danger)', padding: '0.25rem 0.5rem' }}>
+              <button className="btn" style={{ color: 'var(--danger)', padding: '0.25rem 0.5rem' }} onClick={abortCurrentJob}>
                 <StopCircle size={14} /> Abort
               </button>
             )}

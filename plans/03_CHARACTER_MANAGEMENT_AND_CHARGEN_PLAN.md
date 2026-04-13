@@ -53,7 +53,7 @@ Create a reusable character management workflow where users can:
 - tags[]
 - quality_score
 - created_at
-- source_agent (charGen|narrativeManga|other)
+- source_agent (charGen|AutoAnimator|other)
 
 ## Character Reuse Workflow
 1. Generate pack with charGen.
@@ -93,9 +93,9 @@ Create a reusable character management workflow where users can:
 - Optional turnaround variants (front/3-4/profile).
 
 ## Migration Plan
-1. Keep existing narrativeManga chars output behavior.
+1. Keep existing AutoAnimator chars output behavior.
 2. Add charGen pipeline without breaking existing flow.
-3. Add optional import path from library in narrativeManga and podcasting.
+3. Add optional import path from library in AutoAnimator and podcasting.
 
 ## Definition of Done
 - charGen runs standalone and creates reusable pack.

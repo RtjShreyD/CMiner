@@ -31,7 +31,7 @@ Upgrade CMiner into a preview-first reusable-assets studio with higher quality n
 - [ ] Publish character packs into global library.
 - [ ] Add character library browsing UI.
 - [ ] Add character pack picker in agent config.
-- [ ] Inject selected pack into narrativeManga/podcasting pipelines.
+- [ ] Inject selected pack into AutoAnimator/podcasting pipelines.
 
 ## Track E: Preview Pipeline and Quality (Week 6-8)
 - [ ] Generate short sample videos for style bundles.

@@ -78,8 +78,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     manga_parser = subparsers.add_parser(
-        "narrativeManga",
-        help="Run NarrativeManga episodic video pipeline",
+        "AutoAnimator",
+        help="Run AutoAnimator episodic video pipeline",
         description="Generate episodic manga-style videos with multi-character support",
     )
     manga_parser.add_argument("--workspace", default=".", help="Workspace root")
@@ -99,6 +99,33 @@ def _build_parser() -> argparse.ArgumentParser:
         help="'new' starts a fresh series. 'continue' plans the next episode from prior context.",
     )
     manga_parser.add_argument(
+        "--develop",
+        action="store_true",
+        help="When used with --episodes continue, also runs generation chains.",
+    )
+
+    ova_parser = subparsers.add_parser(
+        "ova",
+        help="Run OVA episodic video pipeline",
+        description="Generate OVA episodes with speech-cloud detection and text patching",
+    )
+    ova_parser.add_argument("--workspace", default=".", help="Workspace root")
+    ova_parser.add_argument("--prompt", help="Override base prompt (otherwise reads prompt.txt)")
+    ova_parser.add_argument(
+        "--step",
+        choices=["all", "planner", "chars", "scenes", "audio", "clouds", "video"],
+        default="all",
+        help="Execute specific pipeline step",
+    )
+    ova_parser.add_argument("--session", help="Continue work in an existing session directory")
+    ova_parser.add_argument("--episode", type=int, help="Target a specific episode number")
+    ova_parser.add_argument(
+        "--episodes",
+        choices=["new", "continue"],
+        default="new",
+        help="'new' starts a fresh series. 'continue' plans the next episode from prior context.",
+    )
+    ova_parser.add_argument(
         "--develop",
         action="store_true",
         help="When used with --episodes continue, also runs generation chains.",
@@ -205,7 +232,7 @@ def _run_podcasting(
     return proc.returncode
 
 
-def _run_narrative_manga(
+def _run_auto_animator(
     workspace: str,
     prompt: str | None,
     step: str = "all",
@@ -214,7 +241,41 @@ def _run_narrative_manga(
     episodes: str = "new",
     develop: bool = False,
 ) -> int:
-    runner_script = ROOT / "agents" / "narrativeManga" / "run.py"
+    runner_script = ROOT / "agents" / "AutoAnimator" / "run.py"
+
+    cmd = [
+        sys.executable,
+        str(runner_script),
+        "--workspace",
+        workspace,
+        "--step",
+        step,
+    ]
+    if prompt:
+        cmd.extend(["--prompt", prompt])
+    if session:
+        cmd.extend(["--session", session])
+    if episode is not None:
+        cmd.extend(["--episode", str(episode)])
+    if episodes == "continue":
+        cmd.append("--episodes")
+        cmd.append("continue")
+    if develop:
+        cmd.append("--develop")
+    proc = subprocess.run(cmd, check=False)
+    return proc.returncode
+
+
+def _run_ova(
+    workspace: str,
+    prompt: str | None,
+    step: str = "all",
+    session: str | None = None,
+    episode: int | None = None,
+    episodes: str = "new",
+    develop: bool = False,
+) -> int:
+    runner_script = ROOT / "agents" / "ova" / "run.py"
 
     cmd = [
         sys.executable,
@@ -268,12 +329,12 @@ def _run_char_gen(
 
 def main() -> None:
     parser = _build_parser()
-    args = parser.parse_args(sys.argv[1:])
-
-    if args.command == "studio":
-        from studio.app import CMinerStudioApp
-        CMinerStudioApp().run()
-        return
+    argv = sys.argv[1:]
+    if argv and argv[0] == "narrativeManga":
+        # Backward-compatibility shim while narrativeManga is deprecated.
+        print("[DEPRECATED] 'narrativeManga' is deprecated; use 'AutoAnimator' instead.", file=sys.stderr)
+        argv[0] = "AutoAnimator"
+    args = parser.parse_args(argv)
 
     if args.command == "openclaw":
         raise SystemExit(_run_openclaw_passthrough(args.openclaw_args))
@@ -307,9 +368,22 @@ def main() -> None:
             )
         )
 
-    if args.command == "narrativeManga":
+    if args.command == "AutoAnimator":
         raise SystemExit(
-            _run_narrative_manga(
+            _run_auto_animator(
+                workspace=args.workspace,
+                prompt=args.prompt,
+                step=args.step,
+                session=args.session,
+                episode=args.episode,
+                episodes=args.episodes,
+                develop=args.develop,
+            )
+        )
+
+    if args.command == "ova":
+        raise SystemExit(
+            _run_ova(
                 workspace=args.workspace,
                 prompt=args.prompt,
                 step=args.step,

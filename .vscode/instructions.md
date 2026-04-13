@@ -3,6 +3,13 @@
 These instructions are for contributors and coding agents working in this repository.
 They define how to build and evolve features safely and consistently.
 
+## Environment Lock (Mandatory)
+
+- Use only the conda environment `py_lts` for all Python commands.
+- Always run Python as `conda run -n py_lts python ...`.
+- Always run pip as `conda run -n py_lts pip ...`.
+- Do not use any other Python interpreter, conda env path, or global package context.
+
 ## 1) Environment and Execution
 
 	- `conda run -n py_lts python`
